@@ -1,7 +1,7 @@
-import { Card, Row, Col, Typography, Button } from "antd";
+import { Card, Row, Col, Typography } from "antd";
 import { useGetIdentity } from "@refinedev/core";
 import { useNavigate } from "react-router-dom";
-import { PlusOutlined, CalendarOutlined, FormOutlined } from "@ant-design/icons";
+import { CustomButton } from "../components/CustomButton";
 
 const { Title, Text } = Typography;
 
@@ -86,51 +86,15 @@ export const Dashboard = () => {
             }}
           >
             <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-              <Button
-                type="primary"
-                icon={<PlusOutlined />}
-                onClick={() => navigate("/techs")}
-                style={{
-                  backgroundColor: "#2E7D32",
-                  borderColor: "#2E7D32",
-                  height: "auto",
-                  padding: "12px",
-                  fontSize: "16px",
-                  fontWeight: 600,
-                }}
-              >
-                Add Technician
-              </Button>
-              <Button
-                type="primary"
-                icon={<CalendarOutlined />}
-                onClick={() => navigate("/schedule")}
-                style={{
-                  backgroundColor: "#2E7D32",
-                  borderColor: "#2E7D32",
-                  height: "auto",
-                  padding: "12px",
-                  fontSize: "16px",
-                  fontWeight: 600,
-                }}
-              >
-                Create Schedule
-              </Button>
-              <Button
-                type="primary"
-                icon={<FormOutlined />}
-                onClick={() => navigate("/daily-entry")}
-                style={{
-                  backgroundColor: "#2E7D32",
-                  borderColor: "#2E7D32",
-                  height: "auto",
-                  padding: "12px",
-                  fontSize: "16px",
-                  fontWeight: 600,
-                }}
-              >
-                Log Daily KPIs
-              </Button>
+              <div onClick={() => navigate("/techs")} style={{ cursor: "pointer", width: "100%" }}>
+                <CustomButton type="copper" size="long" text="Add Technician" />
+              </div>
+              <div onClick={() => navigate("/schedule")} style={{ cursor: "pointer", width: "100%" }}>
+                <CustomButton type="copper" size="long" text="Create Schedule" />
+              </div>
+              <div onClick={() => navigate("/daily-entry")} style={{ cursor: "pointer", width: "100%" }}>
+                <CustomButton type="copper" size="long" text="Log Daily KPIs" />
+              </div>
             </div>
           </Card>
         </Col>
