@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Table, Button, Modal, Form, Input, Select, Space, Popconfirm, message, Card, Row, Col } from "antd";
+import { Table, Button, Modal, Form, Input, Select, Space, Popconfirm, message, Card, Row, Col, Spin } from "antd";
 import { PlusOutlined, EditOutlined, DeleteOutlined } from "@ant-design/icons";
 import { supabaseClient } from "../utils";
 
@@ -29,30 +29,45 @@ export const Technicians: React.FC = () => {
   const [editingTech, setEditingTech] = useState<Technician | null>(null);
   const [form] = Form.useForm();
   const [currentShopId, setCurrentShopId] = useState<string | null>(null);
+  const [isInitializing, setIsInitializing] = useState(true);
 
   useEffect(() => {
     const shopId = localStorage.getItem("currentShopId");
+    console.log("Technicians page - Current shop ID:", shopId);
+    
     if (shopId) {
       setCurrentShopId(shopId);
       loadTechnicians(shopId);
+    } else {
+      console.log("No shop ID found, waiting for selection");
+      setIsInitializing(false);
     }
   }, []);
 
   const loadTechnicians = async (shopId: string) => {
     setLoading(true);
-    const { data, error } = await supabaseClient
-      .from("technicians")
-      .select("*")
-      .eq("shop_id", shopId)
-      .order("created_at", { ascending: true });
+    try {
+      console.log("Loading technicians for shop:", shopId);
+      const { data, error } = await supabaseClient
+        .from("technicians")
+        .select("*")
+        .eq("shop_id", shopId)
+        .order("created_at", { ascending: true });
 
-    if (error) {
-      console.error("Error loading technicians:", error);
+      if (error) {
+        console.error("Error loading technicians:", error);
+        message.error("Failed to load technicians: " + error.message);
+      } else {
+        console.log("Loaded technicians:", data?.length || 0);
+        setTechnicians(data || []);
+      }
+    } catch (error) {
+      console.error("Unexpected error:", error);
       message.error("Failed to load technicians");
-    } else {
-      setTechnicians(data || []);
+    } finally {
+      setLoading(false);
+      setIsInitializing(false);
     }
-    setLoading(false);
   };
 
   const handleAdd = () => {
@@ -88,7 +103,7 @@ export const Technicians: React.FC = () => {
       .eq("shop_id", currentShopId);
 
     if (error) {
-      message.error("Failed to delete technician");
+      message.error("Failed to delete technician: " + error.message);
       console.error(error);
     } else {
       message.success("Technician deleted");
@@ -100,7 +115,7 @@ export const Technicians: React.FC = () => {
 
   const handleSubmit = async (values: any) => {
     if (!currentShopId) {
-      message.error("No shop selected");
+      message.error("No shop selected. Please go back and select a shop.");
       return;
     }
     
@@ -186,6 +201,28 @@ export const Technicians: React.FC = () => {
       ),
     },
   ];
+
+  if (isInitializing) {
+    return (
+      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh" }}>
+        <Spin size="large" />
+      </div>
+    );
+  }
+
+  if (!currentShopId) {
+    return (
+      <div style={{ padding: "24px", textAlign: "center" }}>
+        <Card>
+          <h2>No Shop Selected</h2>
+          <p>Please go back and select a shop to continue.</p>
+          <Button type="primary" onClick={() => window.location.href = "/"}>
+            Select Shop
+          </Button>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div style={{ padding: "24px" }}>

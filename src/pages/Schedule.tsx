@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from "react";
-import { Table, Button, Select, Card, message, Switch, Space, Alert, Tag, Input, Tooltip } from "antd";
+import { Table, Button, Select, Card, message, Switch, Space, Alert, Tag, Input, Tooltip, Spin } from "antd";
 import { SaveOutlined, ThunderboltOutlined } from "@ant-design/icons";
 import { supabaseClient } from "../utils";
 
 const { Option } = Select;
-const { TextArea } = Input;
 
 interface Technician {
   id: string;
@@ -16,14 +15,7 @@ interface Technician {
   secondary_day_off: string;
 }
 
-interface Shift {
-  value: string;
-  label: string;
-  hours: number;
-  timeRange: string;
-}
-
-const shifts: Shift[] = [
+const shifts = [
   { value: "off", label: "OFF", hours: 0, timeRange: "" },
   { value: "morning", label: "Morning (7:30am - 4:00pm)", hours: 8, timeRange: "7:30-16:00" },
   { value: "mid", label: "Mid (8:30am - 5:00pm)", hours: 8, timeRange: "8:30-17:00" },
@@ -43,6 +35,19 @@ const getWeekDates = () => {
   });
 };
 
+const parseTimeToDecimal = (timeStr: string): number => {
+  const match = timeStr.match(/(\d+):(\d+)\s*(am|pm)?/i);
+  if (!match) return 0;
+  let hours = parseInt(match[1]);
+  const minutes = parseInt(match[2]) / 60;
+  const period = match[3]?.toLowerCase();
+  
+  if (period === "pm" && hours !== 12) hours += 12;
+  if (period === "am" && hours === 12) hours = 0;
+  
+  return hours + minutes;
+};
+
 const calculateTotalHours = (techId: string, schedule: Record<string, Record<string, string>>, weekDates: any[], manualTimes: Record<string, Record<string, string>>) => {
   let total = 0;
   for (const day of weekDates) {
@@ -57,7 +62,7 @@ const calculateTotalHours = (techId: string, schedule: Record<string, Record<str
         const end = parseTimeToDecimal(parts[1].trim());
         let hours = end - start;
         if (hours < 0) hours += 24;
-        total += Math.max(0, hours - 0.5); // subtract 30 min lunch
+        total += Math.max(0, hours - 0.5);
       }
     } else {
       const shift = shifts.find(s => s.value === shiftValue);
@@ -69,19 +74,6 @@ const calculateTotalHours = (techId: string, schedule: Record<string, Record<str
   return total;
 };
 
-const parseTimeToDecimal = (timeStr: string): number => {
-  const match = timeStr.match(/(\d+):(\d+)\s*(am|pm)?/i);
-  if (!match) return 0;
-  let hours = parseInt(match[1]);
-  const minutes = parseInt(match[2]) / 60;
-  const period = match[3]?.toLowerCase();
-  
-  if (period === "pm" && hours !== 12) hours += 12;
-  if (period === "am" && hours === 12) hours = 0;
-  
-  return hours + minutes;
-};
-
 export const Schedule: React.FC = () => {
   const [technicians, setTechnicians] = useState<Technician[]>([]);
   const [weekDates] = useState(getWeekDates());
@@ -91,12 +83,17 @@ export const Schedule: React.FC = () => {
   const [autoMode, setAutoMode] = useState(false);
   const [currentShopId, setCurrentShopId] = useState<string | null>(null);
   const [violations, setViolations] = useState<Record<string, string[]>>({});
+  const [isInitializing, setIsInitializing] = useState(true);
 
   useEffect(() => {
     const shopId = localStorage.getItem("currentShopId");
+    console.log("Schedule page - Current shop ID:", shopId);
+    
     if (shopId) {
       setCurrentShopId(shopId);
       loadData(shopId);
+    } else {
+      setIsInitializing(false);
     }
   }, []);
 
@@ -141,6 +138,7 @@ export const Schedule: React.FC = () => {
       message.error("Failed to load schedule");
     } finally {
       setLoading(false);
+      setIsInitializing(false);
     }
   };
 
@@ -222,7 +220,7 @@ export const Schedule: React.FC = () => {
     setSchedule(newSchedule);
     setManualTimes({});
     checkViolations(newSchedule, technicians, {});
-    message.success("Auto-schedule applied. Lunch break (30 min) automatically deducted from all shifts.");
+    message.success("Auto-schedule applied.");
   };
 
   const handleSaveSchedule = async () => {
@@ -251,7 +249,6 @@ export const Schedule: React.FC = () => {
             const shift = shifts.find(s => s.value === shiftValue);
             let shiftStart = shift?.timeRange.split("-")[0] || null;
             let shiftEnd = shift?.timeRange.split("-")[1] || null;
-            let customHours = null;
             
             if (shiftValue === "manual" && manualTimes[tech.id]?.[day.date]) {
               const timeRange = manualTimes[tech.id][day.date];
@@ -269,7 +266,6 @@ export const Schedule: React.FC = () => {
               shift: shiftValue,
               shift_start: shiftStart,
               shift_end: shiftEnd,
-              custom_hours: customHours,
               lunch_deducted: shiftValue !== "off" && shiftValue !== "manual" ? 0.5 : 0,
             });
           }
@@ -378,6 +374,28 @@ export const Schedule: React.FC = () => {
   }));
 
   const hasAnyViolations = Object.keys(violations).length > 0;
+
+  if (isInitializing) {
+    return (
+      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh" }}>
+        <Spin size="large" />
+      </div>
+    );
+  }
+
+  if (!currentShopId) {
+    return (
+      <div style={{ padding: "24px", textAlign: "center" }}>
+        <Card>
+          <h2>No Shop Selected</h2>
+          <p>Please go back and select a shop to continue.</p>
+          <Button type="primary" onClick={() => window.location.href = "/"}>
+            Select Shop
+          </Button>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div style={{ padding: "24px" }}>
