@@ -279,6 +279,10 @@ const CustomLayout: React.FC = () => {
             style={{
               margin: "24px",
               padding: "24px",
+              backgroundSize: "cover",
+              backgroundPosition: "center",
+              backgroundAttachment: "fixed",
+              backgroundRepeat: "no-repeat",
               minHeight: 280,
               position: "relative",
             }}
