@@ -281,7 +281,6 @@ const CustomLayout: React.FC = () => {
               padding: "24px",
               minHeight: 280,
               position: "relative",
-              background: "transparent",
             }}
           >
             <Outlet />
