@@ -86,13 +86,13 @@ export const Dashboard = () => {
             }}
           >
             <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-              <div onClick={() => navigate("/techs")}>
+              <div onClick={() => navigate("/techs")} style={{ cursor: "pointer" }}>
                 <CustomButton type="copper" size="long" text="Add Technician" />
               </div>
-              <div onClick={() => navigate("/schedule")}>
+              <div onClick={() => navigate("/schedule")} style={{ cursor: "pointer" }}>
                 <CustomButton type="copper" size="long" text="Create Schedule" />
               </div>
-              <div onClick={() => navigate("/daily-entry")}>
+              <div onClick={() => navigate("/daily-entry")} style={{ cursor: "pointer" }}>
                 <CustomButton type="copper" size="long" text="Log Daily KPIs" />
               </div>
             </div>
