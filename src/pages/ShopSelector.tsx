@@ -97,7 +97,7 @@ export const ShopSelector: React.FC = () => {
         alignItems: "center",
         minHeight: "100vh",
         padding: "24px",
-        backgroundImage: "url('/src/assets/roi_bg_v1.png')",
+        backgroundImage: "url('/images/roi_bg_v1.png')",
         backgroundSize: "cover",
         backgroundPosition: "center",
       }}
