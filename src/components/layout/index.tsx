@@ -89,7 +89,7 @@ const CustomLayout: React.FC = () => {
   return (
     <div
       style={{
-        backgroundImage: "url('/src/assets/roi_bg_v1.png')",
+        backgroundImage: "url('/images/roi_bg_v1.png')",
         backgroundSize: "cover",
         backgroundPosition: "center",
         backgroundAttachment: "fixed",
@@ -106,7 +106,7 @@ const CustomLayout: React.FC = () => {
           width="15%"
           collapsedWidth="80px"
           style={{
-            backgroundImage: "url('/src/assets/sidebar_1.png')",
+            backgroundImage: "url('/images/sidebar_1.png')",
             backgroundSize: "cover",
             backgroundPosition: "center",
             backgroundRepeat: "no-repeat",
@@ -122,7 +122,7 @@ const CustomLayout: React.FC = () => {
             }}
           >
             <img
-              src="/src/assets/roi_brand.png"
+              src="/images/roi_brand.png"
               alt="ROI"
               style={{
                 width: collapsed ? "60px" : "100%",
@@ -196,7 +196,7 @@ const CustomLayout: React.FC = () => {
               }}
             >
               <img
-                src="/src/assets/banner_1.png"
+                src="/images/banner_1.png"
                 alt="Banner"
                 style={{
                   width: "100%",
@@ -218,7 +218,7 @@ const CustomLayout: React.FC = () => {
                 }}
               >
                 <img
-                  src="/src/assets/roi_full.png"
+                  src="/images/roi_full.png"
                   alt="ROI"
                   style={{
                     maxWidth: "200px",
