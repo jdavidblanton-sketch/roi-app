@@ -13,11 +13,6 @@ import {
   ShopOutlined,
   LineChartOutlined,
 } from "@ant-design/icons";
-import roiBrand from '../assets/roi_brand.png';
-import roiFull from '../assets/roi_full.png';
-import roiBg from '../assets/roi_bg_v1.png';
-import banner from '../assets/banner_1.png';
-import sidebar from '../assets/sidebar_1.png';
 
 const { Header, Sider, Content } = AntdLayout;
 
@@ -66,12 +61,12 @@ const CustomLayout: React.FC = () => {
   const userInitial = displayName.charAt(0).toUpperCase();
 
   return (
-    <div style={{ backgroundImage: `url(${roiBg})`, backgroundSize: "cover", backgroundPosition: "center", backgroundAttachment: "fixed", minHeight: "100vh", width: "100%" }}>
+    <div style={{ backgroundImage: "url('/src/assets/roi_bg_v1.png')", backgroundSize: "cover", backgroundPosition: "center", backgroundAttachment: "fixed", minHeight: "100vh", width: "100%" }}>
       <AntdLayout style={{ minHeight: "100vh", background: "transparent" }}>
         <Sider trigger={null} collapsible collapsed={collapsed} width="15%" collapsedWidth="80px"
-          style={{ backgroundImage: `url(${sidebar})`, backgroundSize: "cover", backgroundPosition: "center", borderRight: "1px solid rgba(255,255,255,0.1)" }}>
+          style={{ backgroundImage: "url('/src/assets/sidebar_1.png')", backgroundSize: "cover", backgroundPosition: "center", borderRight: "1px solid rgba(255,255,255,0.1)" }}>
           <div style={{ padding: "16px", textAlign: "center", borderBottom: "1px solid rgba(255,255,255,0.1)", marginBottom: "16px" }}>
-            <img src={roiBrand} alt="ROI" style={{ width: collapsed ? "60px" : "100%", maxWidth: collapsed ? "60px" : "calc(100% - 32px)", height: "auto", display: "block", margin: "0 auto", transform: "scale(1.15)" }} />
+            <img src="/src/assets/roi_brand.png" alt="ROI" style={{ width: collapsed ? "60px" : "100%", maxWidth: collapsed ? "60px" : "calc(100% - 32px)", height: "auto", display: "block", margin: "0 auto", transform: "scale(1.15)" }} />
           </div>
           <div style={{ textAlign: "center", padding: "12px", marginBottom: "16px", borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
             <Button type="text" icon={<ShopOutlined />} onClick={handleSwitchShop} style={{ color: "#E5E7EB", fontSize: collapsed ? "12px" : "14px", padding: collapsed ? "4px 8px" : "8px 16px", height: "auto", width: "100%" }}>
@@ -83,9 +78,9 @@ const CustomLayout: React.FC = () => {
         <AntdLayout style={{ background: "transparent" }}>
           <Header style={{ padding: 0, background: "transparent", height: "auto", position: "relative" }}>
             <div style={{ position: "relative", width: "100%" }}>
-              <img src={banner} alt="Banner" style={{ width: "100%", height: "auto", display: "block" }} />
+              <img src="/src/assets/banner_1.png" alt="Banner" style={{ width: "100%", height: "auto", display: "block" }} />
               <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", zIndex: 2 }}>
-                <img src={roiFull} alt="ROI" style={{ maxWidth: "200px", height: "auto" }} />
+                <img src="/src/assets/roi_full.png" alt="ROI" style={{ maxWidth: "200px", height: "auto" }} />
               </div>
               <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "0 24px", display: "flex", justifyContent: "space-between", alignItems: "center", height: "64px", background: "transparent", zIndex: 2 }}>
                 <Button type="text" icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} onClick={() => setCollapsed(!collapsed)} style={{ fontSize: "16px", width: 64, height: 64, color: "#FFFFFF" }} />
