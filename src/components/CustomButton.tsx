@@ -18,12 +18,14 @@ export const CustomButton: React.FC<CustomButtonProps> = ({
   if (type === "copper" && size === "small") {
     imageSrc = "/images/btn_small_copper.png";
   } else if (type === "copper" && size === "long") {
-    imageSrc = "/images/button_long_copper.png";
+    imageSrc = "/images/btn_long_copper.png";
   } else if (type === "gm" && size === "small") {
     imageSrc = "/images/btn_small_gm.png";
   } else if (type === "gm" && size === "long") {
     imageSrc = "/images/btn_long_gm.png";
   }
+
+  console.log("Loading button image:", imageSrc);
 
   return (
     <button
@@ -64,6 +66,9 @@ export const CustomButton: React.FC<CustomButtonProps> = ({
             e.currentTarget.style.display = "none";
             parent.appendChild(span);
           }
+        }}
+        onLoad={() => {
+          console.log("Button image loaded successfully:", imageSrc);
         }}
       />
       <span
