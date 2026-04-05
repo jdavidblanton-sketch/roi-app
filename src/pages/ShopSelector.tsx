@@ -97,7 +97,7 @@ export const ShopSelector: React.FC = () => {
         alignItems: "center",
         minHeight: "100vh",
         padding: "24px",
-        backgroundColor: "#0F1215",
+        background: "transparent",
       }}
     >
       <Card
