@@ -13,7 +13,7 @@ import {
   ShopOutlined,
   LineChartOutlined,
 } from "@ant-design/icons";
-import { supabaseClient } from "../../utils";
+import { supabaseClient } from "../utils";
 
 const { Header, Sider, Content } = AntdLayout;
 const { Text } = Typography;
@@ -91,7 +91,7 @@ const CustomLayout: React.FC = () => {
   return (
     <div
       style={{
-        backgroundImage: "url('/images/roi_bg_v1.png')",
+        backgroundImage: "url('/src/assets/roi_bg_v1.png')",
         backgroundSize: "cover",
         backgroundPosition: "center",
         backgroundAttachment: "fixed",
@@ -108,7 +108,7 @@ const CustomLayout: React.FC = () => {
           width="15%"
           collapsedWidth="80px"
           style={{
-            backgroundImage: "url('/images/sidebar_1.png')",
+            backgroundImage: "url('/src/assets/sidebar_1.png')",
             backgroundSize: "cover",
             backgroundPosition: "center",
             backgroundRepeat: "no-repeat",
@@ -124,7 +124,7 @@ const CustomLayout: React.FC = () => {
             }}
           >
             <img
-              src="/images/roi_brand.png"
+              src="/src/assets/roi_brand.png"
               alt="ROI"
               style={{
                 width: collapsed ? "60px" : "100%",
@@ -198,7 +198,7 @@ const CustomLayout: React.FC = () => {
               }}
             >
               <img
-                src="/images/banner_1.png"
+                src="/src/assets/banner_1.png"
                 alt="Banner"
                 style={{
                   width: "100%",
@@ -220,7 +220,7 @@ const CustomLayout: React.FC = () => {
                 }}
               >
                 <img
-                  src="/images/roi_full.png"
+                  src="/src/assets/roi_full.png"
                   alt="ROI"
                   style={{
                     maxWidth: "200px",
@@ -283,6 +283,7 @@ const CustomLayout: React.FC = () => {
               padding: "24px",
               minHeight: 280,
               position: "relative",
+              background: "transparent",
             }}
           >
             <Outlet />
