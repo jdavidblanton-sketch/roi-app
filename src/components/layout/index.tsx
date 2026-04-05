@@ -13,7 +13,7 @@ import {
   ShopOutlined,
   LineChartOutlined,
 } from "@ant-design/icons";
-import { supabaseClient } from "../utils";
+import { supabaseClient } from "../../utils";
 
 const { Header, Sider, Content } = AntdLayout;
 const { Text } = Typography;
