@@ -24,14 +24,14 @@ interface Shift {
 
 const shifts: Shift[] = [
   { value: "off", label: "OFF", hours: 0, timeRange: "" },
-  { value: "morning", label: "Morning (7:30am - 4:00pm)", hours: 8, timeRange: "7:30-16:00" },
-  { value: "mid", label: "Mid (8:30am - 5:00pm)", hours: 8, timeRange: "8:30-17:00" },
-  { value: "late", label: "Late (9:30am - 6:00pm)", hours: 8, timeRange: "9:30-18:00" },
+  { value: "morning", label: "Morning (7:30am-4:00pm)", hours: 8, timeRange: "7:30-16:00" },
+  { value: "mid", label: "Mid (8:30am-5:00pm)", hours: 8, timeRange: "8:30-17:00" },
+  { value: "late", label: "Late (9:30am-6:00pm)", hours: 8, timeRange: "9:30-18:00" },
   { value: "manual", label: "Manual", hours: 0, timeRange: "" },
 ];
 
 const daysOfWeek = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-const shiftOptions = ["morning", "mid", "late", "off"];
+const shiftOptions = ["morning", "mid", "late"];
 
 const getWeekDates = (offset: number = 0) => {
   const today = new Date();
@@ -113,21 +113,54 @@ const parseTimeToDecimal = (timeStr: string): number => {
   return hours + minutes;
 };
 
+// Ensure all shifts are covered (at least one tech per shift type)
+const ensureCoverage = (techSchedules: Record<string, Record<string, string>>, technicians: Technician[], dates: any[]): Record<string, Record<string, string>> => {
+  const newSchedules = { ...techSchedules };
+  
+  for (const date of dates) {
+    // Track which shifts are covered on this date
+    const coveredShifts = { morning: false, mid: false, late: false };
+    
+    // Check current coverage
+    for (const tech of technicians) {
+      const shift = newSchedules[tech.id]?.[date.date];
+      if (shift === "morning") coveredShifts.morning = true;
+      if (shift === "mid") coveredShifts.mid = true;
+      if (shift === "late") coveredShifts.late = true;
+    }
+    
+    // Assign uncovered shifts to available techs who aren't off that day
+    for (const shiftType of ["morning", "mid", "late"] as const) {
+      if (!coveredShifts[shiftType]) {
+        // Find a tech who is not off this day
+        const availableTech = technicians.find(tech => {
+          const currentShift = newSchedules[tech.id]?.[date.date];
+          return currentShift !== "off" && tech.primary_day_off !== date.name && tech.secondary_day_off !== date.name;
+        });
+        if (availableTech) {
+          if (!newSchedules[availableTech.id]) newSchedules[availableTech.id] = {};
+          newSchedules[availableTech.id][date.date] = shiftType;
+          coveredShifts[shiftType] = true;
+        }
+      }
+    }
+  }
+  
+  return newSchedules;
+};
+
 // Generate rotational schedule for a technician
 const generateRotationalSchedule = (tech: Technician, weekDates: { name: string; date: string; display: string }[]): Record<string, string> => {
   const weekSchedule: Record<string, string> = {};
   const shiftPool = ["morning", "mid", "late"];
   
-  // Determine starting shift based on tech ID hash for variety
   const techIndex = parseInt(tech.id.slice(-2), 16) || 0;
   let currentShiftIndex = techIndex % shiftPool.length;
   
   for (const day of weekDates) {
-    // Check if this day is a day off for the technician
     if (tech.primary_day_off === day.name || tech.secondary_day_off === day.name) {
       weekSchedule[day.date] = "off";
     } else {
-      // Rotate shifts
       weekSchedule[day.date] = shiftPool[currentShiftIndex % shiftPool.length];
       currentShiftIndex++;
     }
@@ -288,7 +321,7 @@ export const Schedule: React.FC = () => {
   };
 
   const handleAutoSchedule = () => {
-    const newSchedule: Record<string, Record<string, string>> = { ...schedule };
+    let newSchedule: Record<string, Record<string, string>> = { ...schedule };
     const dates = viewMode === "monthly" ? monthWeeks.flatMap(w => w.dates) : weekDates;
     
     for (const tech of technicians) {
@@ -297,13 +330,11 @@ export const Schedule: React.FC = () => {
       }
       
       if (viewMode === "rotational") {
-        // Rotational mode: automatically rotate shifts
         const rotationalSchedule = generateRotationalSchedule(tech, dates);
         for (const date of dates.map(d => d.date)) {
           newSchedule[tech.id][date] = rotationalSchedule[date] || "off";
         }
       } else {
-        // Weekly mode: assign shifts based on day off preferences
         for (const day of dates) {
           if (tech.primary_day_off === day.name || tech.secondary_day_off === day.name) {
             newSchedule[tech.id][day.date] = "off";
@@ -314,10 +345,13 @@ export const Schedule: React.FC = () => {
       }
     }
     
+    // Ensure open to close coverage (all shifts covered)
+    newSchedule = ensureCoverage(newSchedule, technicians, dates);
+    
     setSchedule(newSchedule);
     setManualTimes({});
     checkViolations(newSchedule, technicians, {});
-    message.success(viewMode === "rotational" ? "Rotational schedule generated. Shifts rotate daily for each tech." : "Auto-schedule applied.");
+    message.success(viewMode === "rotational" ? "Rotational schedule generated with full shift coverage." : "Auto-schedule applied with full shift coverage.");
   };
 
   const handleCopyToMonth = () => {
@@ -341,7 +375,6 @@ export const Schedule: React.FC = () => {
       
       for (const tech of technicians) {
         for (const targetDate of targetDates) {
-          // Find the corresponding source day of week
           const targetDayName = targetWeeks.flatMap(w => w.dates).find(d => d.date === targetDate)?.name;
           const sourceDate = sourceDates.find((_, idx) => weekDates[idx]?.name === targetDayName);
           if (sourceDate && newSchedule[tech.id]?.[sourceDate]) {
@@ -352,7 +385,6 @@ export const Schedule: React.FC = () => {
       
       setSchedule(newSchedule);
       
-      // Save to database
       const allEntries: any[] = [];
       for (const tech of technicians) {
         for (const targetDate of targetDates) {
@@ -468,21 +500,24 @@ export const Schedule: React.FC = () => {
     }
   };
 
-  // Determine which dates to display
   const displayDates = viewMode === "monthly" ? monthWeeks.flatMap(w => w.dates) : weekDates;
   
+  // Reduced column width for no horizontal scroll
   const columns = [
-    { title: "Technician", dataIndex: "name", key: "name", fixed: "left" as const, width: 160 },
+    { title: "Tech", dataIndex: "name", key: "name", fixed: "left" as const, width: 100 },
     ...displayDates.map((day) => ({
       title: day.display,
       key: day.date,
-      width: 220,
+      width: 130,
       render: (_: any, record: any) => {
         const tech = technicians.find(t => t.id === record.id);
         const isDayOff = tech && (tech.primary_day_off === day.name || tech.secondary_day_off === day.name);
         const shiftValue = schedule[record.id]?.[day.date] || "off";
         const isManual = shiftValue === "manual";
         const manualTimeValue = manualTimes[record.id]?.[day.date] || "";
+        
+        // In auto mode, only show shift options (no manual)
+        const availableShifts = autoMode ? shifts.filter(s => s.value !== "manual") : shifts;
         
         return (
           <Space direction="vertical" size="small" style={{ width: "100%" }}>
@@ -494,9 +529,9 @@ export const Schedule: React.FC = () => {
               status={isDayOff && shiftValue !== "off" ? "warning" : undefined}
               disabled={viewMode === "rotational" && !autoMode}
             >
-              {shifts.map((s) => (<Option key={s.value} value={s.value}>{s.label}</Option>))}
+              {availableShifts.map((s) => (<Option key={s.value} value={s.value}>{s.label}</Option>))}
             </Select>
-            {isManual && (
+            {isManual && !autoMode && (
               <Input
                 placeholder="e.g., 9:00am-5:00pm"
                 value={manualTimeValue}
@@ -506,16 +541,16 @@ export const Schedule: React.FC = () => {
               />
             )}
             {!isManual && shiftValue !== "off" && (
-              <Tag color="blue" style={{ fontSize: "10px", margin: 0 }}>🍱 -0.5hr lunch</Tag>
+              <Tag color="blue" style={{ fontSize: "10px", margin: 0 }}>🍱 -0.5hr</Tag>
             )}
           </Space>
         );
       },
     })),
     {
-      title: "Total Hours",
+      title: "Total Hrs",
       key: "totalHours",
-      width: 100,
+      width: 80,
       fixed: "right" as const,
       render: (_: any, record: any) => {
         const total = calculateTotalHours(record.id, schedule, displayDates, manualTimes);
@@ -526,29 +561,23 @@ export const Schedule: React.FC = () => {
           if (tech.max_hours > 0 && total > tech.max_hours) status = "error";
         }
         return (
-          <Tooltip title={status === "warning" ? "Below minimum hours" : status === "error" ? "Above maximum hours" : "Within limits"}>
-            <Tag color={status === "warning" ? "orange" : status === "error" ? "red" : "green"}>{total.toFixed(1)} hrs</Tag>
+          <Tooltip title={status === "warning" ? "Below min" : status === "error" ? "Above max" : "OK"}>
+            <Tag color={status === "warning" ? "orange" : status === "error" ? "red" : "green"}>{total.toFixed(0)}</Tag>
           </Tooltip>
         );
       },
     },
     {
-      title: "Violations",
+      title: "Issues",
       key: "violations",
-      width: 180,
+      width: 100,
       fixed: "right" as const,
       render: (_: any, record: any) => {
         const techViolations = violations[record.id];
         if (!techViolations || techViolations.length === 0) {
           return <Tag color="green">OK</Tag>;
         }
-        return (
-          <Space direction="vertical" size="small">
-            {techViolations.map((v, i) => (
-              <Tag key={i} color="orange" style={{ margin: 0 }}>{v}</Tag>
-            ))}
-          </Space>
-        );
+        return <Tag color="orange" title={techViolations.join(", ")}>{techViolations.length}</Tag>;
       },
     },
   ];
@@ -556,7 +585,7 @@ export const Schedule: React.FC = () => {
   const dataSource = technicians.map((tech) => ({
     key: tech.id,
     id: tech.id,
-    name: `${tech.first_name} ${tech.last_name}`,
+    name: `${tech.first_name.charAt(0)}${tech.last_name.charAt(0)}`,
   }));
 
   const hasAnyViolations = Object.keys(violations).length > 0;
@@ -573,22 +602,22 @@ export const Schedule: React.FC = () => {
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "12px" }}>
           <Space>
-            <Radio.Group value={viewMode} onChange={(e) => setViewMode(e.target.value)} buttonStyle="solid">
-              <Radio.Button value="weekly">Weekly</Radio.Button>
-              <Radio.Button value="monthly">Monthly</Radio.Button>
-              <Radio.Button value="rotational">Rotational</Radio.Button>
+            <Radio.Group value={viewMode} onChange={(e) => setViewMode(e.target.value)} buttonStyle="solid" size="small">
+              <Radio.Button value="weekly">Week</Radio.Button>
+              <Radio.Button value="monthly">Month</Radio.Button>
+              <Radio.Button value="rotational">Rotate</Radio.Button>
             </Radio.Group>
             
             {viewMode !== "rotational" && (
               <>
-                <Button icon={<LeftOutlined />} onClick={() => handleNavigate('prev')}>Prev</Button>
-                <span style={{ color: "#E5E7EB" }}>{getPeriodLabel()}</span>
-                <Button icon={<RightOutlined />} onClick={() => handleNavigate('next')}>Next</Button>
+                <Button icon={<LeftOutlined />} onClick={() => handleNavigate('prev')} size="small">Prev</Button>
+                <span style={{ color: "#E5E7EB", fontSize: "12px" }}>{getPeriodLabel()}</span>
+                <Button icon={<RightOutlined />} onClick={() => handleNavigate('next')} size="small">Next</Button>
               </>
             )}
             
             {viewMode === "weekly" && (
-              <Button icon={<CopyOutlined />} onClick={handleCopyToMonth}>Copy to Month</Button>
+              <Button icon={<CopyOutlined />} onClick={handleCopyToMonth} size="small">Copy Month</Button>
             )}
           </Space>
           
@@ -598,15 +627,17 @@ export const Schedule: React.FC = () => {
               onChange={setAutoMode}
               checkedChildren="Auto"
               unCheckedChildren="Manual"
+              size="small"
             />
-            <span style={{ color: "#E5E7EB" }}>{autoMode ? "Auto Mode" : "Manual Mode"}</span>
+            <span style={{ color: "#E5E7EB", fontSize: "12px" }}>{autoMode ? "Auto" : "Manual"}</span>
             {autoMode && (
               <Button
                 icon={<ThunderboltOutlined />}
                 onClick={handleAutoSchedule}
                 style={{ backgroundColor: "#2E7D32", color: "#FFF" }}
+                size="small"
               >
-                {viewMode === "rotational" ? "Generate Rotational" : "Generate Auto Schedule"}
+                {viewMode === "rotational" ? "Rotate" : "Auto"}
               </Button>
             )}
             <Button
@@ -615,59 +646,52 @@ export const Schedule: React.FC = () => {
               onClick={handleSaveSchedule}
               style={{ backgroundColor: hasAnyViolations ? "#E65100" : "#2E7D32" }}
               loading={loading}
+              size="small"
             >
-              Save Schedule
+              Save
             </Button>
           </Space>
         </div>
 
         {viewMode === "rotational" && !autoMode && (
           <Alert
-            message="Rotational Mode"
-            description="Rotational scheduling requires Auto Mode to be enabled. Toggle Auto Mode above to generate rotational schedules."
+            message="Enable Auto Mode for Rotational"
+            description="Toggle Auto Mode above to generate rotational schedules."
             type="info"
             showIcon
-            style={{ marginBottom: "16px", background: "rgba(46,125,50,0.2)", borderColor: "#2E7D32" }}
+            style={{ marginBottom: "12px", background: "rgba(46,125,50,0.2)", borderColor: "#2E7D32", padding: "8px" }}
           />
         )}
 
         {hasAnyViolations && (
           <Alert
-            message="Scheduling Violations Detected"
-            description="Some technicians have day off conflicts or hours outside their min/max limits."
+            message={`${Object.keys(violations).length} techs have violations`}
             type="warning"
             showIcon
-            style={{ marginBottom: "16px", background: "rgba(230,81,0,0.2)", borderColor: "#E65100" }}
+            style={{ marginBottom: "12px", background: "rgba(230,81,0,0.2)", borderColor: "#E65100", padding: "8px" }}
           />
         )}
-
-        <Alert
-          message="30-Minute Lunch Break"
-          description="All shifts include a mandatory 30-minute unpaid lunch break. For manual shifts, enter start and end time (e.g., 9:00am-5:00pm)."
-          type="info"
-          showIcon
-          style={{ marginBottom: "16px", background: "rgba(46,125,50,0.2)", borderColor: "#2E7D32" }}
-        />
 
         <Table
           columns={columns}
           dataSource={dataSource}
           loading={loading}
           pagination={false}
-          scroll={{ x: "max-content" }}
+          size="small"
+          scroll={{ x: displayDates.length * 130 }}
         />
       </Card>
 
-      {/* Copy to Month Modal */}
       <Modal
-        title="Copy Weekly Schedule to Month"
+        title="Copy to Month"
         open={copyModalVisible}
         onOk={handleConfirmCopyToMonth}
         onCancel={() => setCopyModalVisible(false)}
         okText="Copy"
         cancelText="Cancel"
+        width={400}
       >
-        <p style={{ color: "#E5E7EB" }}>Select which weeks in {getPeriodLabel()} to copy the current weekly schedule to:</p>
+        <p>Select weeks to copy current schedule to:</p>
         <Checkbox.Group onChange={(checked) => setSelectedWeeks(checked as number[])} style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "16px" }}>
           {monthWeeks.map((week, idx) => (
             <Checkbox key={idx} value={idx + 1}>
