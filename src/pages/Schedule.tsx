@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { Table, Button, Select, Card, message, Switch, Space, Alert, Tag, Input, Tooltip, Radio, Pagination } from "antd";
-import { SaveOutlined, ThunderboltOutlined, LeftOutlined, RightOutlined } from "@ant-design/icons";
+import { Table, Button, Select, Card, message, Switch, Space, Alert, Tag, Input, Tooltip, Radio, Modal, Checkbox } from "antd";
+import { SaveOutlined, ThunderboltOutlined, LeftOutlined, RightOutlined, CopyOutlined } from "@ant-design/icons";
 import { supabaseClient } from "../utils";
 
 const { Option } = Select;
@@ -30,37 +30,48 @@ const shifts: Shift[] = [
   { value: "manual", label: "Manual", hours: 0, timeRange: "" },
 ];
 
-type ViewMode = "weekly" | "monthly" | "rotational";
+const daysOfWeek = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const shiftOptions = ["morning", "mid", "late", "off"];
 
 const getWeekDates = (offset: number = 0) => {
   const today = new Date();
   const startOfWeek = new Date(today);
   startOfWeek.setDate(today.getDate() - today.getDay() + 1 + offset * 7);
-  const weekDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-  return weekDays.map((day, index) => {
+  return daysOfWeek.map((day, index) => {
     const date = new Date(startOfWeek);
     date.setDate(startOfWeek.getDate() + index);
     return { name: day, date: date.toISOString().split("T")[0], display: `${day.slice(0,3)} ${date.getMonth() + 1}/${date.getDate()}` };
   });
 };
 
-const getMonthDates = (offset: number = 0) => {
+const getMonthWeeks = (offset: number = 0) => {
   const today = new Date();
   const targetMonth = new Date(today.getFullYear(), today.getMonth() + offset, 1);
   const year = targetMonth.getFullYear();
   const month = targetMonth.getMonth();
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
-  const dates = [];
+  
+  const weeks: { weekNumber: number; dates: { name: string; date: string; display: string }[] }[] = [];
+  let currentWeek: { name: string; date: string; display: string }[] = [];
+  let weekCounter = 1;
+  
   for (let d = new Date(firstDay); d <= lastDay; d.setDate(d.getDate() + 1)) {
     const dayName = d.toLocaleDateString('en-US', { weekday: 'long' });
-    dates.push({
+    currentWeek.push({
       name: dayName,
       date: d.toISOString().split("T")[0],
       display: `${dayName.slice(0,3)} ${d.getMonth() + 1}/${d.getDate()}`,
     });
+    
+    if (dayName === "Sunday" || d.getTime() === lastDay.getTime()) {
+      weeks.push({ weekNumber: weekCounter, dates: [...currentWeek] });
+      currentWeek = [];
+      weekCounter++;
+    }
   }
-  return dates;
+  
+  return weeks;
 };
 
 const calculateTotalHours = (techId: string, schedule: Record<string, Record<string, string>>, dates: any[], manualTimes: Record<string, Record<string, string>>) => {
@@ -102,17 +113,43 @@ const parseTimeToDecimal = (timeStr: string): number => {
   return hours + minutes;
 };
 
+// Generate rotational schedule for a technician
+const generateRotationalSchedule = (tech: Technician, weekDates: { name: string; date: string; display: string }[]): Record<string, string> => {
+  const weekSchedule: Record<string, string> = {};
+  const shiftPool = ["morning", "mid", "late"];
+  
+  // Determine starting shift based on tech ID hash for variety
+  const techIndex = parseInt(tech.id.slice(-2), 16) || 0;
+  let currentShiftIndex = techIndex % shiftPool.length;
+  
+  for (const day of weekDates) {
+    // Check if this day is a day off for the technician
+    if (tech.primary_day_off === day.name || tech.secondary_day_off === day.name) {
+      weekSchedule[day.date] = "off";
+    } else {
+      // Rotate shifts
+      weekSchedule[day.date] = shiftPool[currentShiftIndex % shiftPool.length];
+      currentShiftIndex++;
+    }
+  }
+  
+  return weekSchedule;
+};
+
 export const Schedule: React.FC = () => {
   const [technicians, setTechnicians] = useState<Technician[]>([]);
-  const [viewMode, setViewMode] = useState<ViewMode>("weekly");
+  const [viewMode, setViewMode] = useState<"weekly" | "monthly" | "rotational">("weekly");
   const [currentOffset, setCurrentOffset] = useState(0);
-  const [dates, setDates] = useState(getWeekDates(0));
+  const [weekDates, setWeekDates] = useState(getWeekDates(0));
+  const [monthWeeks, setMonthWeeks] = useState(getMonthWeeks(0));
   const [schedule, setSchedule] = useState<Record<string, Record<string, string>>>({});
   const [manualTimes, setManualTimes] = useState<Record<string, Record<string, string>>>({});
   const [loading, setLoading] = useState(false);
   const [autoMode, setAutoMode] = useState(false);
   const [currentShopId, setCurrentShopId] = useState<string | null>(null);
   const [violations, setViolations] = useState<Record<string, string[]>>({});
+  const [copyModalVisible, setCopyModalVisible] = useState(false);
+  const [selectedWeeks, setSelectedWeeks] = useState<number[]>([]);
 
   useEffect(() => {
     const shopId = localStorage.getItem("currentShopId");
@@ -124,19 +161,21 @@ export const Schedule: React.FC = () => {
 
   useEffect(() => {
     if (viewMode === "weekly") {
-      setDates(getWeekDates(currentOffset));
+      setWeekDates(getWeekDates(currentOffset));
     } else if (viewMode === "monthly") {
-      setDates(getMonthDates(currentOffset));
+      setMonthWeeks(getMonthWeeks(currentOffset));
     } else if (viewMode === "rotational") {
-      setDates(getWeekDates(currentOffset));
+      setWeekDates(getWeekDates(0));
     }
   }, [viewMode, currentOffset]);
 
   useEffect(() => {
     if (currentShopId && technicians.length > 0) {
-      loadSchedule(currentShopId);
+      if (viewMode === "weekly" || viewMode === "rotational") {
+        loadSchedule(weekDates.map(d => d.date));
+      }
     }
-  }, [dates]);
+  }, [weekDates, technicians]);
 
   const loadData = async (shopId: string) => {
     setLoading(true);
@@ -149,7 +188,7 @@ export const Schedule: React.FC = () => {
       if (techError) throw techError;
       setTechnicians(techData || []);
       
-      await loadSchedule(shopId);
+      await loadSchedule(weekDates.map(d => d.date));
     } catch (error) {
       console.error("Error loading data:", error);
       message.error("Failed to load schedule");
@@ -158,13 +197,13 @@ export const Schedule: React.FC = () => {
     }
   };
 
-  const loadSchedule = async (shopId: string) => {
-    const dateStrings = dates.map(d => d.date);
+  const loadSchedule = async (dateStrings: string[]) => {
+    if (!currentShopId) return;
     
     const { data: scheduleData, error: scheduleError } = await supabaseClient
       .from("schedule")
       .select("*")
-      .eq("shop_id", shopId)
+      .eq("shop_id", currentShopId)
       .in("date", dateStrings);
 
     if (scheduleError) throw scheduleError;
@@ -174,12 +213,12 @@ export const Schedule: React.FC = () => {
     
     technicians.forEach((tech) => {
       scheduleMap[tech.id] = {};
-      dates.forEach((day) => {
-        const existing = scheduleData?.find((s: any) => s.tech_id === tech.id && s.date === day.date);
-        scheduleMap[tech.id][day.date] = existing?.shift || "off";
+      dateStrings.forEach((date) => {
+        const existing = scheduleData?.find((s: any) => s.tech_id === tech.id && s.date === date);
+        scheduleMap[tech.id][date] = existing?.shift || "off";
         if (existing?.shift === "manual" && existing?.shift_start && existing?.shift_end) {
           if (!manualTimesMap[tech.id]) manualTimesMap[tech.id] = {};
-          manualTimesMap[tech.id][day.date] = `${existing.shift_start}-${existing.shift_end}`;
+          manualTimesMap[tech.id][date] = `${existing.shift_start}-${existing.shift_end}`;
         }
       });
     });
@@ -191,6 +230,7 @@ export const Schedule: React.FC = () => {
 
   const checkViolations = (currentSchedule: Record<string, Record<string, string>>, techs: Technician[], currentManualTimes: Record<string, Record<string, string>>) => {
     const newViolations: Record<string, string[]> = {};
+    const dates = viewMode === "monthly" ? monthWeeks.flatMap(w => w.dates) : weekDates;
     
     for (const tech of techs) {
       const techViolations: string[] = [];
@@ -249,17 +289,27 @@ export const Schedule: React.FC = () => {
 
   const handleAutoSchedule = () => {
     const newSchedule: Record<string, Record<string, string>> = { ...schedule };
+    const dates = viewMode === "monthly" ? monthWeeks.flatMap(w => w.dates) : weekDates;
     
     for (const tech of technicians) {
       if (!newSchedule[tech.id]) {
         newSchedule[tech.id] = {};
       }
       
-      for (const day of dates) {
-        if (tech.primary_day_off === day.name || tech.secondary_day_off === day.name) {
-          newSchedule[tech.id][day.date] = "off";
-        } else if (!newSchedule[tech.id][day.date] || newSchedule[tech.id][day.date] === "off") {
-          newSchedule[tech.id][day.date] = "morning";
+      if (viewMode === "rotational") {
+        // Rotational mode: automatically rotate shifts
+        const rotationalSchedule = generateRotationalSchedule(tech, dates);
+        for (const date of dates.map(d => d.date)) {
+          newSchedule[tech.id][date] = rotationalSchedule[date] || "off";
+        }
+      } else {
+        // Weekly mode: assign shifts based on day off preferences
+        for (const day of dates) {
+          if (tech.primary_day_off === day.name || tech.secondary_day_off === day.name) {
+            newSchedule[tech.id][day.date] = "off";
+          } else if (!newSchedule[tech.id][day.date] || newSchedule[tech.id][day.date] === "off") {
+            newSchedule[tech.id][day.date] = "morning";
+          }
         }
       }
     }
@@ -267,7 +317,74 @@ export const Schedule: React.FC = () => {
     setSchedule(newSchedule);
     setManualTimes({});
     checkViolations(newSchedule, technicians, {});
-    message.success("Auto-schedule applied. Lunch break (30 min) automatically deducted from all shifts.");
+    message.success(viewMode === "rotational" ? "Rotational schedule generated. Shifts rotate daily for each tech." : "Auto-schedule applied.");
+  };
+
+  const handleCopyToMonth = () => {
+    setCopyModalVisible(true);
+    setSelectedWeeks([]);
+  };
+
+  const handleConfirmCopyToMonth = async () => {
+    if (selectedWeeks.length === 0) {
+      message.error("Please select at least one week to copy to");
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      const sourceDates = weekDates.map(d => d.date);
+      const targetWeeks = monthWeeks.filter((_, idx) => selectedWeeks.includes(idx + 1));
+      const targetDates = targetWeeks.flatMap(w => w.dates.map(d => d.date));
+      
+      const newSchedule = { ...schedule };
+      
+      for (const tech of technicians) {
+        for (const targetDate of targetDates) {
+          // Find the corresponding source day of week
+          const targetDayName = targetWeeks.flatMap(w => w.dates).find(d => d.date === targetDate)?.name;
+          const sourceDate = sourceDates.find((_, idx) => weekDates[idx]?.name === targetDayName);
+          if (sourceDate && newSchedule[tech.id]?.[sourceDate]) {
+            newSchedule[tech.id][targetDate] = newSchedule[tech.id][sourceDate];
+          }
+        }
+      }
+      
+      setSchedule(newSchedule);
+      
+      // Save to database
+      const allEntries: any[] = [];
+      for (const tech of technicians) {
+        for (const targetDate of targetDates) {
+          const shiftValue = newSchedule[tech.id]?.[targetDate] || "off";
+          if (shiftValue !== "off") {
+            const shift = shifts.find(s => s.value === shiftValue);
+            allEntries.push({
+              shop_id: currentShopId,
+              tech_id: tech.id,
+              date: targetDate,
+              shift: shiftValue,
+              shift_start: shift?.timeRange.split("-")[0] || null,
+              shift_end: shift?.timeRange.split("-")[1] || null,
+              lunch_deducted: shiftValue !== "off" && shiftValue !== "manual" ? 0.5 : 0,
+            });
+          }
+        }
+      }
+      
+      if (allEntries.length > 0) {
+        await supabaseClient.from("schedule").upsert(allEntries);
+      }
+      
+      message.success(`Copied weekly schedule to ${selectedWeeks.length} week(s) in the month`);
+      setCopyModalVisible(false);
+      loadSchedule([...new Set([...weekDates.map(d => d.date), ...targetDates])]);
+    } catch (error) {
+      console.error("Error copying to month:", error);
+      message.error("Failed to copy schedule");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSaveSchedule = async () => {
@@ -281,16 +398,16 @@ export const Schedule: React.FC = () => {
     
     setLoading(true);
     try {
-      const dateStrings = dates.map(d => d.date);
+      const dates = viewMode === "monthly" ? monthWeeks.flatMap(w => w.dates).map(d => d.date) : weekDates.map(d => d.date);
       await supabaseClient
         .from("schedule")
         .delete()
         .eq("shop_id", currentShopId)
-        .in("date", dateStrings);
+        .in("date", dates);
 
       const newEntries: any[] = [];
       for (const tech of technicians) {
-        for (const day of dates) {
+        for (const day of (viewMode === "monthly" ? monthWeeks.flatMap(w => w.dates) : weekDates)) {
           const shiftValue = schedule[tech.id]?.[day.date] || "off";
           if (shiftValue !== "off") {
             const shift = shifts.find(s => s.value === shiftValue);
@@ -313,7 +430,6 @@ export const Schedule: React.FC = () => {
               shift: shiftValue,
               shift_start: shiftStart,
               shift_end: shiftEnd,
-              custom_hours: null,
               lunch_deducted: shiftValue !== "off" && shiftValue !== "manual" ? 0.5 : 0,
             });
           }
@@ -338,9 +454,26 @@ export const Schedule: React.FC = () => {
     setCurrentOffset(prev => direction === 'prev' ? prev - 1 : prev + 1);
   };
 
+  const getPeriodLabel = () => {
+    if (viewMode === "weekly") {
+      const start = weekDates[0]?.date;
+      const end = weekDates[6]?.date;
+      return `Week of ${start}`;
+    } else if (viewMode === "monthly") {
+      const date = new Date();
+      const targetMonth = new Date(date.getFullYear(), date.getMonth() + currentOffset, 1);
+      return targetMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    } else {
+      return "Rotational Schedule (Auto only)";
+    }
+  };
+
+  // Determine which dates to display
+  const displayDates = viewMode === "monthly" ? monthWeeks.flatMap(w => w.dates) : weekDates;
+  
   const columns = [
     { title: "Technician", dataIndex: "name", key: "name", fixed: "left" as const, width: 160 },
-    ...dates.map((day) => ({
+    ...displayDates.map((day) => ({
       title: day.display,
       key: day.date,
       width: 220,
@@ -359,6 +492,7 @@ export const Schedule: React.FC = () => {
               style={{ width: "100%" }}
               size="small"
               status={isDayOff && shiftValue !== "off" ? "warning" : undefined}
+              disabled={viewMode === "rotational" && !autoMode}
             >
               {shifts.map((s) => (<Option key={s.value} value={s.value}>{s.label}</Option>))}
             </Select>
@@ -384,7 +518,7 @@ export const Schedule: React.FC = () => {
       width: 100,
       fixed: "right" as const,
       render: (_: any, record: any) => {
-        const total = calculateTotalHours(record.id, schedule, dates, manualTimes);
+        const total = calculateTotalHours(record.id, schedule, displayDates, manualTimes);
         const tech = technicians.find(t => t.id === record.id);
         let status = "";
         if (tech) {
@@ -426,22 +560,6 @@ export const Schedule: React.FC = () => {
   }));
 
   const hasAnyViolations = Object.keys(violations).length > 0;
-  
-  const getPeriodLabel = () => {
-    if (viewMode === "weekly") {
-      const start = dates[0]?.date;
-      const end = dates[dates.length - 1]?.date;
-      return `Week of ${start}`;
-    } else if (viewMode === "monthly") {
-      const date = new Date();
-      const targetMonth = new Date(date.getFullYear(), date.getMonth() + currentOffset, 1);
-      return targetMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-    } else {
-      const start = dates[0]?.date;
-      const end = dates[dates.length - 1]?.date;
-      return `Rotation: ${start} to ${end}`;
-    }
-  };
 
   return (
     <div style={{ padding: "24px" }}>
@@ -461,9 +579,17 @@ export const Schedule: React.FC = () => {
               <Radio.Button value="rotational">Rotational</Radio.Button>
             </Radio.Group>
             
-            <Button icon={<LeftOutlined />} onClick={() => handleNavigate('prev')}>Prev</Button>
-            <span style={{ color: "#E5E7EB" }}>{getPeriodLabel()}</span>
-            <Button icon={<RightOutlined />} onClick={() => handleNavigate('next')}>Next</Button>
+            {viewMode !== "rotational" && (
+              <>
+                <Button icon={<LeftOutlined />} onClick={() => handleNavigate('prev')}>Prev</Button>
+                <span style={{ color: "#E5E7EB" }}>{getPeriodLabel()}</span>
+                <Button icon={<RightOutlined />} onClick={() => handleNavigate('next')}>Next</Button>
+              </>
+            )}
+            
+            {viewMode === "weekly" && (
+              <Button icon={<CopyOutlined />} onClick={handleCopyToMonth}>Copy to Month</Button>
+            )}
           </Space>
           
           <Space>
@@ -480,7 +606,7 @@ export const Schedule: React.FC = () => {
                 onClick={handleAutoSchedule}
                 style={{ backgroundColor: "#2E7D32", color: "#FFF" }}
               >
-                Generate Auto Schedule
+                {viewMode === "rotational" ? "Generate Rotational" : "Generate Auto Schedule"}
               </Button>
             )}
             <Button
@@ -494,6 +620,16 @@ export const Schedule: React.FC = () => {
             </Button>
           </Space>
         </div>
+
+        {viewMode === "rotational" && !autoMode && (
+          <Alert
+            message="Rotational Mode"
+            description="Rotational scheduling requires Auto Mode to be enabled. Toggle Auto Mode above to generate rotational schedules."
+            type="info"
+            showIcon
+            style={{ marginBottom: "16px", background: "rgba(46,125,50,0.2)", borderColor: "#2E7D32" }}
+          />
+        )}
 
         {hasAnyViolations && (
           <Alert
@@ -521,6 +657,25 @@ export const Schedule: React.FC = () => {
           scroll={{ x: "max-content" }}
         />
       </Card>
+
+      {/* Copy to Month Modal */}
+      <Modal
+        title="Copy Weekly Schedule to Month"
+        open={copyModalVisible}
+        onOk={handleConfirmCopyToMonth}
+        onCancel={() => setCopyModalVisible(false)}
+        okText="Copy"
+        cancelText="Cancel"
+      >
+        <p style={{ color: "#E5E7EB" }}>Select which weeks in {getPeriodLabel()} to copy the current weekly schedule to:</p>
+        <Checkbox.Group onChange={(checked) => setSelectedWeeks(checked as number[])} style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "16px" }}>
+          {monthWeeks.map((week, idx) => (
+            <Checkbox key={idx} value={idx + 1}>
+              Week {week.weekNumber} ({week.dates[0]?.display} - {week.dates[week.dates.length - 1]?.display})
+            </Checkbox>
+          ))}
+        </Checkbox.Group>
+      </Modal>
     </div>
   );
 };
