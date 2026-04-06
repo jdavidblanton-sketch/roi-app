@@ -44,7 +44,7 @@ const App = () => {
             }}
           >
             <Routes>
-              {/* ShopSelector is OUTSIDE the layout (no sidebar/banner) */}
+              {/* ShopSelector is OUTSIDE the layout - no sidebar, no banner */}
               <Route path="/" element={<ShopSelector />} />
               
               {/* All other pages are INSIDE the layout */}
