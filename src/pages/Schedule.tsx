@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { Table, Button, Select, Card, message, Switch, Space, Alert, Tag, Input, Tooltip, Spin } from "antd";
-import { SaveOutlined, ThunderboltOutlined } from "@ant-design/icons";
+import { Table, Button, Select, Card, message, Switch, Space, Alert, Tag, Input, Tooltip, Radio, Pagination } from "antd";
+import { SaveOutlined, ThunderboltOutlined, LeftOutlined, RightOutlined } from "@ant-design/icons";
 import { supabaseClient } from "../utils";
 
 const { Option } = Select;
@@ -15,7 +15,14 @@ interface Technician {
   secondary_day_off: string;
 }
 
-const shifts = [
+interface Shift {
+  value: string;
+  label: string;
+  hours: number;
+  timeRange: string;
+}
+
+const shifts: Shift[] = [
   { value: "off", label: "OFF", hours: 0, timeRange: "" },
   { value: "morning", label: "Morning (7:30am - 4:00pm)", hours: 8, timeRange: "7:30-16:00" },
   { value: "mid", label: "Mid (8:30am - 5:00pm)", hours: 8, timeRange: "8:30-17:00" },
@@ -23,10 +30,12 @@ const shifts = [
   { value: "manual", label: "Manual", hours: 0, timeRange: "" },
 ];
 
-const getWeekDates = () => {
+type ViewMode = "weekly" | "monthly" | "rotational";
+
+const getWeekDates = (offset: number = 0) => {
   const today = new Date();
   const startOfWeek = new Date(today);
-  startOfWeek.setDate(today.getDate() - today.getDay() + 1);
+  startOfWeek.setDate(today.getDate() - today.getDay() + 1 + offset * 7);
   const weekDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
   return weekDays.map((day, index) => {
     const date = new Date(startOfWeek);
@@ -35,22 +44,28 @@ const getWeekDates = () => {
   });
 };
 
-const parseTimeToDecimal = (timeStr: string): number => {
-  const match = timeStr.match(/(\d+):(\d+)\s*(am|pm)?/i);
-  if (!match) return 0;
-  let hours = parseInt(match[1]);
-  const minutes = parseInt(match[2]) / 60;
-  const period = match[3]?.toLowerCase();
-  
-  if (period === "pm" && hours !== 12) hours += 12;
-  if (period === "am" && hours === 12) hours = 0;
-  
-  return hours + minutes;
+const getMonthDates = (offset: number = 0) => {
+  const today = new Date();
+  const targetMonth = new Date(today.getFullYear(), today.getMonth() + offset, 1);
+  const year = targetMonth.getFullYear();
+  const month = targetMonth.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const dates = [];
+  for (let d = new Date(firstDay); d <= lastDay; d.setDate(d.getDate() + 1)) {
+    const dayName = d.toLocaleDateString('en-US', { weekday: 'long' });
+    dates.push({
+      name: dayName,
+      date: d.toISOString().split("T")[0],
+      display: `${dayName.slice(0,3)} ${d.getMonth() + 1}/${d.getDate()}`,
+    });
+  }
+  return dates;
 };
 
-const calculateTotalHours = (techId: string, schedule: Record<string, Record<string, string>>, weekDates: any[], manualTimes: Record<string, Record<string, string>>) => {
+const calculateTotalHours = (techId: string, schedule: Record<string, Record<string, string>>, dates: any[], manualTimes: Record<string, Record<string, string>>) => {
   let total = 0;
-  for (const day of weekDates) {
+  for (const day of dates) {
     const shiftValue = schedule[techId]?.[day.date] || "off";
     if (shiftValue === "off") continue;
     
@@ -74,28 +89,54 @@ const calculateTotalHours = (techId: string, schedule: Record<string, Record<str
   return total;
 };
 
+const parseTimeToDecimal = (timeStr: string): number => {
+  const match = timeStr.match(/(\d+):(\d+)\s*(am|pm)?/i);
+  if (!match) return 0;
+  let hours = parseInt(match[1]);
+  const minutes = parseInt(match[2]) / 60;
+  const period = match[3]?.toLowerCase();
+  
+  if (period === "pm" && hours !== 12) hours += 12;
+  if (period === "am" && hours === 12) hours = 0;
+  
+  return hours + minutes;
+};
+
 export const Schedule: React.FC = () => {
   const [technicians, setTechnicians] = useState<Technician[]>([]);
-  const [weekDates] = useState(getWeekDates());
+  const [viewMode, setViewMode] = useState<ViewMode>("weekly");
+  const [currentOffset, setCurrentOffset] = useState(0);
+  const [dates, setDates] = useState(getWeekDates(0));
   const [schedule, setSchedule] = useState<Record<string, Record<string, string>>>({});
   const [manualTimes, setManualTimes] = useState<Record<string, Record<string, string>>>({});
   const [loading, setLoading] = useState(false);
   const [autoMode, setAutoMode] = useState(false);
   const [currentShopId, setCurrentShopId] = useState<string | null>(null);
   const [violations, setViolations] = useState<Record<string, string[]>>({});
-  const [isInitializing, setIsInitializing] = useState(true);
 
   useEffect(() => {
     const shopId = localStorage.getItem("currentShopId");
-    console.log("Schedule page - Current shop ID:", shopId);
-    
     if (shopId) {
       setCurrentShopId(shopId);
       loadData(shopId);
-    } else {
-      setIsInitializing(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (viewMode === "weekly") {
+      setDates(getWeekDates(currentOffset));
+    } else if (viewMode === "monthly") {
+      setDates(getMonthDates(currentOffset));
+    } else if (viewMode === "rotational") {
+      setDates(getWeekDates(currentOffset));
+    }
+  }, [viewMode, currentOffset]);
+
+  useEffect(() => {
+    if (currentShopId && technicians.length > 0) {
+      loadSchedule(currentShopId);
+    }
+  }, [dates]);
 
   const loadData = async (shopId: string) => {
     setLoading(true);
@@ -107,39 +148,45 @@ export const Schedule: React.FC = () => {
 
       if (techError) throw techError;
       setTechnicians(techData || []);
-
-      const { data: scheduleData, error: scheduleError } = await supabaseClient
-        .from("schedule")
-        .select("*")
-        .eq("shop_id", shopId);
-
-      if (scheduleError) throw scheduleError;
-
-      const scheduleMap: Record<string, Record<string, string>> = {};
-      const manualTimesMap: Record<string, Record<string, string>> = {};
       
-      techData?.forEach((tech) => {
-        scheduleMap[tech.id] = {};
-        weekDates.forEach((day) => {
-          const existing = scheduleData?.find((s: any) => s.tech_id === tech.id && s.date === day.date);
-          scheduleMap[tech.id][day.date] = existing?.shift || "off";
-          if (existing?.shift === "manual" && existing?.shift_start && existing?.shift_end) {
-            if (!manualTimesMap[tech.id]) manualTimesMap[tech.id] = {};
-            manualTimesMap[tech.id][day.date] = `${existing.shift_start}-${existing.shift_end}`;
-          }
-        });
-      });
-      
-      setSchedule(scheduleMap);
-      setManualTimes(manualTimesMap);
-      checkViolations(scheduleMap, techData || [], manualTimesMap);
+      await loadSchedule(shopId);
     } catch (error) {
       console.error("Error loading data:", error);
       message.error("Failed to load schedule");
     } finally {
       setLoading(false);
-      setIsInitializing(false);
     }
+  };
+
+  const loadSchedule = async (shopId: string) => {
+    const dateStrings = dates.map(d => d.date);
+    
+    const { data: scheduleData, error: scheduleError } = await supabaseClient
+      .from("schedule")
+      .select("*")
+      .eq("shop_id", shopId)
+      .in("date", dateStrings);
+
+    if (scheduleError) throw scheduleError;
+
+    const scheduleMap: Record<string, Record<string, string>> = {};
+    const manualTimesMap: Record<string, Record<string, string>> = {};
+    
+    technicians.forEach((tech) => {
+      scheduleMap[tech.id] = {};
+      dates.forEach((day) => {
+        const existing = scheduleData?.find((s: any) => s.tech_id === tech.id && s.date === day.date);
+        scheduleMap[tech.id][day.date] = existing?.shift || "off";
+        if (existing?.shift === "manual" && existing?.shift_start && existing?.shift_end) {
+          if (!manualTimesMap[tech.id]) manualTimesMap[tech.id] = {};
+          manualTimesMap[tech.id][day.date] = `${existing.shift_start}-${existing.shift_end}`;
+        }
+      });
+    });
+    
+    setSchedule(scheduleMap);
+    setManualTimes(manualTimesMap);
+    checkViolations(scheduleMap, technicians, manualTimesMap);
   };
 
   const checkViolations = (currentSchedule: Record<string, Record<string, string>>, techs: Technician[], currentManualTimes: Record<string, Record<string, string>>) => {
@@ -148,7 +195,7 @@ export const Schedule: React.FC = () => {
     for (const tech of techs) {
       const techViolations: string[] = [];
       
-      for (const day of weekDates) {
+      for (const day of dates) {
         const shiftValue = currentSchedule[tech.id]?.[day.date] || "off";
         if (shiftValue !== "off") {
           if (tech.primary_day_off && tech.primary_day_off !== "None" && day.name === tech.primary_day_off) {
@@ -160,7 +207,7 @@ export const Schedule: React.FC = () => {
         }
       }
       
-      const totalHours = calculateTotalHours(tech.id, currentSchedule, weekDates, currentManualTimes);
+      const totalHours = calculateTotalHours(tech.id, currentSchedule, dates, currentManualTimes);
       if (tech.min_hours > 0 && totalHours < tech.min_hours) {
         techViolations.push(`Hours (${totalHours.toFixed(1)}) below minimum (${tech.min_hours})`);
       }
@@ -208,7 +255,7 @@ export const Schedule: React.FC = () => {
         newSchedule[tech.id] = {};
       }
       
-      for (const day of weekDates) {
+      for (const day of dates) {
         if (tech.primary_day_off === day.name || tech.secondary_day_off === day.name) {
           newSchedule[tech.id][day.date] = "off";
         } else if (!newSchedule[tech.id][day.date] || newSchedule[tech.id][day.date] === "off") {
@@ -220,7 +267,7 @@ export const Schedule: React.FC = () => {
     setSchedule(newSchedule);
     setManualTimes({});
     checkViolations(newSchedule, technicians, {});
-    message.success("Auto-schedule applied.");
+    message.success("Auto-schedule applied. Lunch break (30 min) automatically deducted from all shifts.");
   };
 
   const handleSaveSchedule = async () => {
@@ -234,16 +281,16 @@ export const Schedule: React.FC = () => {
     
     setLoading(true);
     try {
-      const weekDateStrings = weekDates.map(d => d.date);
+      const dateStrings = dates.map(d => d.date);
       await supabaseClient
         .from("schedule")
         .delete()
         .eq("shop_id", currentShopId)
-        .in("date", weekDateStrings);
+        .in("date", dateStrings);
 
       const newEntries: any[] = [];
       for (const tech of technicians) {
-        for (const day of weekDates) {
+        for (const day of dates) {
           const shiftValue = schedule[tech.id]?.[day.date] || "off";
           if (shiftValue !== "off") {
             const shift = shifts.find(s => s.value === shiftValue);
@@ -266,6 +313,7 @@ export const Schedule: React.FC = () => {
               shift: shiftValue,
               shift_start: shiftStart,
               shift_end: shiftEnd,
+              custom_hours: null,
               lunch_deducted: shiftValue !== "off" && shiftValue !== "manual" ? 0.5 : 0,
             });
           }
@@ -286,9 +334,13 @@ export const Schedule: React.FC = () => {
     }
   };
 
+  const handleNavigate = (direction: 'prev' | 'next') => {
+    setCurrentOffset(prev => direction === 'prev' ? prev - 1 : prev + 1);
+  };
+
   const columns = [
     { title: "Technician", dataIndex: "name", key: "name", fixed: "left" as const, width: 160 },
-    ...weekDates.map((day) => ({
+    ...dates.map((day) => ({
       title: day.display,
       key: day.date,
       width: 220,
@@ -332,7 +384,7 @@ export const Schedule: React.FC = () => {
       width: 100,
       fixed: "right" as const,
       render: (_: any, record: any) => {
-        const total = calculateTotalHours(record.id, schedule, weekDates, manualTimes);
+        const total = calculateTotalHours(record.id, schedule, dates, manualTimes);
         const tech = technicians.find(t => t.id === record.id);
         let status = "";
         if (tech) {
@@ -374,28 +426,22 @@ export const Schedule: React.FC = () => {
   }));
 
   const hasAnyViolations = Object.keys(violations).length > 0;
-
-  if (isInitializing) {
-    return (
-      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh" }}>
-        <Spin size="large" />
-      </div>
-    );
-  }
-
-  if (!currentShopId) {
-    return (
-      <div style={{ padding: "24px", textAlign: "center" }}>
-        <Card>
-          <h2>No Shop Selected</h2>
-          <p>Please go back and select a shop to continue.</p>
-          <Button type="primary" onClick={() => window.location.href = "/"}>
-            Select Shop
-          </Button>
-        </Card>
-      </div>
-    );
-  }
+  
+  const getPeriodLabel = () => {
+    if (viewMode === "weekly") {
+      const start = dates[0]?.date;
+      const end = dates[dates.length - 1]?.date;
+      return `Week of ${start}`;
+    } else if (viewMode === "monthly") {
+      const date = new Date();
+      const targetMonth = new Date(date.getFullYear(), date.getMonth() + currentOffset, 1);
+      return targetMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    } else {
+      const start = dates[0]?.date;
+      const end = dates[dates.length - 1]?.date;
+      return `Rotation: ${start} to ${end}`;
+    }
+  };
 
   return (
     <div style={{ padding: "24px" }}>
@@ -408,6 +454,18 @@ export const Schedule: React.FC = () => {
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "12px" }}>
+          <Space>
+            <Radio.Group value={viewMode} onChange={(e) => setViewMode(e.target.value)} buttonStyle="solid">
+              <Radio.Button value="weekly">Weekly</Radio.Button>
+              <Radio.Button value="monthly">Monthly</Radio.Button>
+              <Radio.Button value="rotational">Rotational</Radio.Button>
+            </Radio.Group>
+            
+            <Button icon={<LeftOutlined />} onClick={() => handleNavigate('prev')}>Prev</Button>
+            <span style={{ color: "#E5E7EB" }}>{getPeriodLabel()}</span>
+            <Button icon={<RightOutlined />} onClick={() => handleNavigate('next')}>Next</Button>
+          </Space>
+          
           <Space>
             <Switch
               checked={autoMode}
@@ -425,16 +483,16 @@ export const Schedule: React.FC = () => {
                 Generate Auto Schedule
               </Button>
             )}
+            <Button
+              type="primary"
+              icon={<SaveOutlined />}
+              onClick={handleSaveSchedule}
+              style={{ backgroundColor: hasAnyViolations ? "#E65100" : "#2E7D32" }}
+              loading={loading}
+            >
+              Save Schedule
+            </Button>
           </Space>
-          <Button
-            type="primary"
-            icon={<SaveOutlined />}
-            onClick={handleSaveSchedule}
-            style={{ backgroundColor: hasAnyViolations ? "#E65100" : "#2E7D32" }}
-            loading={loading}
-          >
-            Save Schedule
-          </Button>
         </div>
 
         {hasAnyViolations && (
