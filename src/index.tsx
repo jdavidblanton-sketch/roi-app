@@ -20,6 +20,7 @@ import { Schedule } from "./pages/Schedule";
 import { DailyEntry } from "./pages/DailyEntry";
 import { TechPerformance } from "./pages/TechPerformance";
 import { ShopSelector } from "./pages/ShopSelector";
+import { ShopSettings } from "./pages/ShopSettings";
 import CustomLayout from "./components/layout";
 
 const App = () => {
@@ -43,13 +44,17 @@ const App = () => {
             }}
           >
             <Routes>
+              {/* ShopSelector is OUTSIDE the layout (no sidebar/banner) */}
+              <Route path="/" element={<ShopSelector />} />
+              
+              {/* All other pages are INSIDE the layout */}
               <Route element={<CustomLayout />}>
-                <Route index element={<ShopSelector />} />
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/techs" element={<Technicians />} />
                 <Route path="/schedule" element={<Schedule />} />
                 <Route path="/daily-entry" element={<DailyEntry />} />
                 <Route path="/tech-performance" element={<TechPerformance />} />
+                <Route path="/settings" element={<ShopSettings />} />
                 <Route path="*" element={<ErrorComponent />} />
               </Route>
             </Routes>

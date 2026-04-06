@@ -12,6 +12,7 @@ import {
   MenuUnfoldOutlined,
   ShopOutlined,
   LineChartOutlined,
+  SettingOutlined,
 } from "@ant-design/icons";
 
 const { Header, Sider, Content } = AntdLayout;
@@ -79,6 +80,11 @@ const CustomLayout: React.FC = () => {
       key: "/techs",
       icon: <TeamOutlined />,
       label: <Link to="/techs">Technicians</Link>,
+    },
+    {
+      key: "/settings",
+      icon: <SettingOutlined />,
+      label: <Link to="/settings">Shop Settings</Link>,
     },
   ];
 
@@ -279,10 +285,6 @@ const CustomLayout: React.FC = () => {
             style={{
               margin: "24px",
               padding: "24px",
-              backgroundSize: "cover",
-              backgroundPosition: "center",
-              backgroundAttachment: "fixed",
-              backgroundRepeat: "no-repeat",
               minHeight: 280,
               position: "relative",
             }}
