@@ -91,7 +91,7 @@ const calculateTotalHours = (techId: string, schedule: Record<string, Record<str
 
 const getAvailableShiftsForDay = (operationalHours: { open: string | null; close: string | null }) => {
   if (!operationalHours.open || !operationalHours.close) {
-    return [{ value: "off", label: "OFF", hours: 0 }];
+    return [];
   }
   
   const openHour = parseFloat(operationalHours.open.split(":")[0]) + parseFloat(operationalHours.open.split(":")[1]) / 60;
@@ -104,16 +104,16 @@ const getAvailableShiftsForDay = (operationalHours: { open: string | null; close
   const lateStart = 9.5;
   const lateEnd = 18.0;
   
-  const availableShifts = [{ value: "off", label: "OFF", hours: 0 }];
+  const availableShifts: string[] = [];
   
   if (morningStart >= openHour && morningEnd <= closeHour) {
-    availableShifts.push({ value: "morning", label: "MORN", hours: 8 });
+    availableShifts.push("morning");
   }
   if (midStart >= openHour && midEnd <= closeHour) {
-    availableShifts.push({ value: "mid", label: "MID", hours: 8 });
+    availableShifts.push("mid");
   }
   if (lateStart >= openHour && lateEnd <= closeHour) {
-    availableShifts.push({ value: "late", label: "LATE", hours: 8 });
+    availableShifts.push("late");
   }
   
   return availableShifts;
@@ -138,20 +138,27 @@ const distributeShifts = (
   
   // For each day, assign shifts to technicians who are available
   for (const day of dates) {
+    // Check if shop is open this day
+    const dayKey = day.dayKey as keyof WorkWeek;
+    const isShopOpenDay = workWeek[dayKey];
     const dayHours = operationalHours[day.dayKey as keyof OperationalHours];
-    const isShopOpen = workWeek[day.dayKey as keyof WorkWeek] && dayHours?.open && dayHours?.close;
+    const hasOperationalHours = dayHours?.open && dayHours?.close;
     
-    if (!isShopOpen) {
+    console.log(`Day: ${day.name}, isShopOpenDay: ${isShopOpenDay}, hasOperationalHours: ${hasOperationalHours}`);
+    
+    if (!isShopOpenDay || !hasOperationalHours) {
       continue; // Shop closed, everyone stays off
     }
     
-    const availableShifts = getAvailableShiftsForDay(dayHours).filter(s => s.value !== "off");
+    const availableShifts = getAvailableShiftsForDay(dayHours);
     if (availableShifts.length === 0) continue;
     
     // Find technicians available this day (not on day off)
     const availableTechs = technicians.filter(tech => 
       tech.primary_day_off !== day.name && tech.secondary_day_off !== day.name
     );
+    
+    console.log(`Day ${day.name}: availableTechs = ${availableTechs.length}, availableShifts = ${availableShifts.length}`);
     
     if (availableTechs.length === 0) continue;
     
@@ -160,7 +167,7 @@ const distributeShifts = (
       const shift = availableShifts[i];
       const techIndex = i % availableTechs.length;
       const tech = availableTechs[techIndex];
-      newSchedule[tech.id][day.date] = shift.value;
+      newSchedule[tech.id][day.date] = shift;
     }
   }
   
@@ -182,10 +189,12 @@ const rotateShifts = (
     const shiftPool = ["morning", "mid", "late"];
     
     for (const day of dates) {
+      const dayKey = day.dayKey as keyof WorkWeek;
+      const isShopOpenDay = workWeek[dayKey];
       const dayHours = operationalHours[day.dayKey as keyof OperationalHours];
-      const isShopOpen = workWeek[day.dayKey as keyof WorkWeek] && dayHours?.open && dayHours?.close;
+      const hasOperationalHours = dayHours?.open && dayHours?.close;
       
-      if (!isShopOpen) {
+      if (!isShopOpenDay || !hasOperationalHours) {
         newSchedule[tech.id][day.date] = "off";
         continue;
       }
@@ -195,7 +204,7 @@ const rotateShifts = (
         continue;
       }
       
-      const availableShifts = getAvailableShiftsForDay(dayHours).filter(s => s.value !== "off").map(s => s.value);
+      const availableShifts = getAvailableShiftsForDay(dayHours);
       if (availableShifts.length === 0) {
         newSchedule[tech.id][day.date] = "off";
       } else {
@@ -324,6 +333,9 @@ export const Schedule: React.FC = () => {
       return;
     }
     
+    console.log("Auto-schedule triggered. Shop settings:", shopSettings);
+    console.log("Technicians:", technicians.map(t => ({ id: t.id, name: `${t.first_name} ${t.last_name}`, primary_day_off: t.primary_day_off, secondary_day_off: t.secondary_day_off })));
+    
     const dates = viewMode === "monthly" ? monthWeeks.flatMap(w => w.dates) : weekDates;
     const operationalHours = shopSettings.operational_hours;
     const workWeek = shopSettings.work_week;
@@ -337,7 +349,7 @@ export const Schedule: React.FC = () => {
     }
     
     setSchedule(newSchedule);
-    message.success(viewMode === "rotational" ? "Rotational schedule generated." : "Auto-schedule applied with balanced shift distribution.");
+    message.success(viewMode === "rotational" ? "Rotational schedule generated." : "Auto-schedule applied.");
   };
 
   const handleSaveSchedule = async () => {
