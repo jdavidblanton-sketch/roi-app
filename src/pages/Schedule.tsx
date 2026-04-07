@@ -89,6 +89,7 @@ const calculateTotalHours = (techId: string, schedule: Record<string, Record<str
   return total;
 };
 
+// Get available shifts based on operational hours for a day
 const getAvailableShiftsForDay = (operationalHours: { open: string | null; close: string | null }) => {
   if (!operationalHours.open || !operationalHours.close) {
     return [];
@@ -96,24 +97,31 @@ const getAvailableShiftsForDay = (operationalHours: { open: string | null; close
   
   const openHour = parseFloat(operationalHours.open.split(":")[0]) + parseFloat(operationalHours.open.split(":")[1]) / 60;
   const closeHour = parseFloat(operationalHours.close.split(":")[0]) + parseFloat(operationalHours.close.split(":")[1]) / 60;
+  const shiftDuration = 8; // 8 hour shift plus 0.5 lunch = 8.5 total, but we schedule 8 hours
   
-  const morningStart = 7.5;
-  const morningEnd = 16.0;
-  const midStart = 8.5;
-  const midEnd = 17.0;
-  const lateStart = 9.5;
-  const lateEnd = 18.0;
+  // Calculate shift start times that fit within operational hours
+  // Shift must start at least 30 min after open and end at least 30 min before close
+  const earliestStart = openHour + 0.5; // 30 min after open
+  const latestStart = closeHour - shiftDuration - 0.5; // Must end 30 min before close
   
   const availableShifts: string[] = [];
   
-  if (morningStart >= openHour && morningEnd <= closeHour) {
+  // Morning shift (7:30am default, but adjust to shop hours)
+  if (earliestStart <= 7.5 && latestStart >= 7.5) {
     availableShifts.push("morning");
   }
-  if (midStart >= openHour && midEnd <= closeHour) {
+  // Mid shift (8:30am default)
+  if (earliestStart <= 8.5 && latestStart >= 8.5) {
     availableShifts.push("mid");
   }
-  if (lateStart >= openHour && lateEnd <= closeHour) {
+  // Late shift (9:30am default)
+  if (earliestStart <= 9.5 && latestStart >= 9.5) {
     availableShifts.push("late");
+  }
+  
+  // If no standard shifts fit, create a custom shift starting at earliestStart
+  if (availableShifts.length === 0 && earliestStart < latestStart) {
+    availableShifts.push("morning"); // Use morning as fallback
   }
   
   return availableShifts;
@@ -138,27 +146,25 @@ const distributeShifts = (
   
   // For each day, assign shifts to technicians who are available
   for (const day of dates) {
-    // Check if shop is open this day
     const dayKey = day.dayKey as keyof WorkWeek;
     const isShopOpenDay = workWeek[dayKey];
     const dayHours = operationalHours[day.dayKey as keyof OperationalHours];
     const hasOperationalHours = dayHours?.open && dayHours?.close;
     
-    console.log(`Day: ${day.name}, isShopOpenDay: ${isShopOpenDay}, hasOperationalHours: ${hasOperationalHours}`);
-    
     if (!isShopOpenDay || !hasOperationalHours) {
-      continue; // Shop closed, everyone stays off
+      continue;
     }
     
     const availableShifts = getAvailableShiftsForDay(dayHours);
-    if (availableShifts.length === 0) continue;
+    if (availableShifts.length === 0) {
+      // No shifts fit, keep everyone off
+      continue;
+    }
     
     // Find technicians available this day (not on day off)
     const availableTechs = technicians.filter(tech => 
       tech.primary_day_off !== day.name && tech.secondary_day_off !== day.name
     );
-    
-    console.log(`Day ${day.name}: availableTechs = ${availableTechs.length}, availableShifts = ${availableShifts.length}`);
     
     if (availableTechs.length === 0) continue;
     
@@ -186,7 +192,6 @@ const rotateShifts = (
   for (const tech of technicians) {
     newSchedule[tech.id] = {};
     let shiftRotation = 0;
-    const shiftPool = ["morning", "mid", "late"];
     
     for (const day of dates) {
       const dayKey = day.dayKey as keyof WorkWeek;
@@ -208,7 +213,6 @@ const rotateShifts = (
       if (availableShifts.length === 0) {
         newSchedule[tech.id][day.date] = "off";
       } else {
-        // Rotate through available shifts
         const shiftToAssign = availableShifts[shiftRotation % availableShifts.length];
         newSchedule[tech.id][day.date] = shiftToAssign;
         shiftRotation++;
@@ -333,9 +337,6 @@ export const Schedule: React.FC = () => {
       return;
     }
     
-    console.log("Auto-schedule triggered. Shop settings:", shopSettings);
-    console.log("Technicians:", technicians.map(t => ({ id: t.id, name: `${t.first_name} ${t.last_name}`, primary_day_off: t.primary_day_off, secondary_day_off: t.secondary_day_off })));
-    
     const dates = viewMode === "monthly" ? monthWeeks.flatMap(w => w.dates) : weekDates;
     const operationalHours = shopSettings.operational_hours;
     const workWeek = shopSettings.work_week;
@@ -402,10 +403,6 @@ export const Schedule: React.FC = () => {
       width: 90,
       render: (_: any, record: any) => {
         const shiftValue = schedule[record.id]?.[day.date] || "off";
-        let shiftLabel = "OFF";
-        if (shiftValue === "morning") shiftLabel = "MORN";
-        else if (shiftValue === "mid") shiftLabel = "MID";
-        else if (shiftValue === "late") shiftLabel = "LATE";
         
         return (
           <Select
