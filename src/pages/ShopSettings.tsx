@@ -66,13 +66,12 @@ export const ShopSettings: React.FC = () => {
       .from("shop_settings")
       .select("*")
       .eq("shop_id", shopId)
-      .single();
+      .maybeSingle(); // Use maybeSingle instead of single to avoid 406 error
 
-    if (error && error.code !== "PGRST116") {
+    if (error) {
       console.error("Error loading settings:", error);
     } else if (data) {
       setWorkWeek(data.work_week || workWeek);
-
       if (data.operational_hours) {
         const hours: any = {};
         Object.keys(data.operational_hours).forEach((day) => {
@@ -84,7 +83,6 @@ export const ShopSettings: React.FC = () => {
         });
         setOperationalHours(hours);
       }
-
       setHolidays(data.holidays || []);
       setAutoRules(data.auto_schedule_rules || autoRules);
     }
@@ -104,18 +102,23 @@ export const ShopSettings: React.FC = () => {
       };
     });
 
-    const { error } = await supabaseClient.from("shop_settings").upsert({
-      shop_id: currentShopId,
-      work_week: workWeek,
-      operational_hours: formattedHours,
-      holidays: holidays,
-      auto_schedule_rules: autoRules,
-      updated_at: new Date().toISOString(),
-    });
+    // Use upsert with onConflict to handle duplicates properly
+    const { error } = await supabaseClient
+      .from("shop_settings")
+      .upsert({
+        shop_id: currentShopId,
+        work_week: workWeek,
+        operational_hours: formattedHours,
+        holidays: holidays,
+        auto_schedule_rules: autoRules,
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: 'shop_id',
+      });
 
     if (error) {
       console.error("Error saving settings:", error);
-      message.error("Failed to save settings");
+      message.error("Failed to save settings: " + error.message);
     } else {
       message.success("Settings saved successfully");
     }
