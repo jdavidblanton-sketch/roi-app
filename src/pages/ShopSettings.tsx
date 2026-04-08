@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { Card, Form, Switch, TimePicker, Button, Space, message, Tabs, Table, Popconfirm, Input, Row, Col, Typography, Divider, InputNumber, Collapse, Alert } from "antd";
-import { PlusOutlined, DeleteOutlined, SaveOutlined, SettingOutlined } from "@ant-design/icons";
+import { Card, Switch, TimePicker, Button, Space, message, Tabs, Table, Popconfirm, Input, Row, Col, Typography, InputNumber, Collapse, Alert } from "antd";
+import { PlusOutlined, DeleteOutlined, SaveOutlined } from "@ant-design/icons";
 import { supabaseClient } from "../utils";
 import dayjs from "dayjs";
 
@@ -25,6 +25,11 @@ interface DayOverride {
 
 const daysOfWeek = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 const dayLabels = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+// Initialize day overrides with all days
+const getInitialDayOverrides = (): DayOverride[] => {
+  return daysOfWeek.map(day => ({ day, min_techs: null, max_techs: null }));
+};
 
 export const ShopSettings: React.FC = () => {
   const [currentShopId, setCurrentShopId] = useState<string | null>(null);
@@ -63,9 +68,7 @@ export const ShopSettings: React.FC = () => {
   });
   
   const [enableAdvancedOverrides, setEnableAdvancedOverrides] = useState(false);
-  const [dayOverrides, setDayOverrides] = useState<DayOverride[]>(
-    daysOfWeek.map(day => ({ day, min_techs: null, max_techs: null }))
-  );
+  const [dayOverrides, setDayOverrides] = useState<DayOverride[]>(getInitialDayOverrides());
   
   const [shiftTypeLimits, setShiftTypeLimits] = useState({
     morning: { min: 1, max: 3, enabled: false },
@@ -109,12 +112,16 @@ export const ShopSettings: React.FC = () => {
       
       if (data.advanced_settings) {
         setEnableAdvancedOverrides(data.advanced_settings.enable || false);
-        if (data.advanced_settings.day_overrides) {
+        if (data.advanced_settings.day_overrides && data.advanced_settings.day_overrides.length > 0) {
           setDayOverrides(data.advanced_settings.day_overrides);
+        } else {
+          setDayOverrides(getInitialDayOverrides());
         }
         if (data.advanced_settings.shift_type_limits) {
           setShiftTypeLimits(data.advanced_settings.shift_type_limits);
         }
+      } else {
+        setDayOverrides(getInitialDayOverrides());
       }
     }
     setLoading(false);
@@ -188,31 +195,43 @@ export const ShopSettings: React.FC = () => {
     }));
   };
 
-  const getEffectiveMinTechs = (day: string, shiftType?: string): number => {
-    if (shiftType && shiftTypeLimits[shiftType as keyof typeof shiftTypeLimits]?.enabled) {
-      return shiftTypeLimits[shiftType as keyof typeof shiftTypeLimits].min;
-    }
-    if (enableAdvancedOverrides) {
-      const override = dayOverrides.find(d => d.day === day);
-      if (override && override.min_techs !== null && override.min_techs !== undefined) {
-        return override.min_techs;
-      }
-    }
-    return autoRules.min_techs_per_shift;
-  };
-
-  const getEffectiveMaxTechs = (day: string, shiftType?: string): number => {
-    if (shiftType && shiftTypeLimits[shiftType as keyof typeof shiftTypeLimits]?.enabled) {
-      return shiftTypeLimits[shiftType as keyof typeof shiftTypeLimits].max;
-    }
-    if (enableAdvancedOverrides) {
-      const override = dayOverrides.find(d => d.day === day);
-      if (override && override.max_techs !== null && override.max_techs !== undefined) {
-        return override.max_techs;
-      }
-    }
-    return autoRules.max_techs_per_shift;
-  };
+  // Columns for the day overrides table
+  const dayOverrideColumns = [
+    { 
+      title: "Day", 
+      dataIndex: "day", 
+      key: "day", 
+      render: (day: string) => dayLabels[daysOfWeek.indexOf(day)] 
+    },
+    {
+      title: "Min Technicians",
+      key: "min_techs",
+      render: (_: any, record: DayOverride) => (
+        <InputNumber
+          value={record.min_techs}
+          onChange={(val) => updateDayOverride(record.day, 'min_techs', val)}
+          min={0}
+          max={10}
+          placeholder="Use default"
+          style={{ width: "120px" }}
+        />
+      ),
+    },
+    {
+      title: "Max Technicians",
+      key: "max_techs",
+      render: (_: any, record: DayOverride) => (
+        <InputNumber
+          value={record.max_techs}
+          onChange={(val) => updateDayOverride(record.day, 'max_techs', val)}
+          min={1}
+          max={20}
+          placeholder="Use default"
+          style={{ width: "120px" }}
+        />
+      ),
+    },
+  ];
 
   return (
     <div style={{ padding: "24px" }}>
@@ -491,37 +510,7 @@ export const ShopSettings: React.FC = () => {
                         dataSource={dayOverrides}
                         rowKey="day"
                         pagination={false}
-                        columns={[
-                          { title: "Day", dataIndex: "day", key: "day", render: (day: string) => dayLabels[daysOfWeek.indexOf(day)] },
-                          {
-                            title: "Min Technicians",
-                            key: "min_techs",
-                            render: (_: any, record: DayOverride) => (
-                              <InputNumber
-                                value={record.min_techs}
-                                onChange={(val) => updateDayOverride(record.day, 'min_techs', val)}
-                                min={0}
-                                max={10}
-                                placeholder="Use default"
-                                style={{ width: "120px" }}
-                              />
-                            ),
-                          },
-                          {
-                            title: "Max Technicians",
-                            key: "max_techs",
-                            render: (_: any, record: DayOverride) => (
-                              <InputNumber
-                                value={record.max_techs}
-                                onChange={(val) => updateDayOverride(record.day, 'max_techs', val)}
-                                min={1}
-                                max={20}
-                                placeholder="Use default"
-                                style={{ width: "120px" }}
-                              />
-                            ),
-                          },
-                        ]}
+                        columns={dayOverrideColumns}
                       />
                     </Panel>
                   </Collapse>
