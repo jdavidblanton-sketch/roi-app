@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from "react";
-import { Card, Form, Switch, TimePicker, Button, Space, message, Tabs, Table, Popconfirm, Input, Row, Col, Typography } from "antd";
-import { PlusOutlined, DeleteOutlined, SaveOutlined } from "@ant-design/icons";
+import { Card, Form, Switch, TimePicker, Button, Space, message, Tabs, Table, Popconfirm, Input, Row, Col, Typography, Divider, InputNumber, Collapse, Alert } from "antd";
+import { PlusOutlined, DeleteOutlined, SaveOutlined, SettingOutlined } from "@ant-design/icons";
 import { supabaseClient } from "../utils";
 import dayjs from "dayjs";
 
 const { Title, Text } = Typography;
 const { TabPane } = Tabs;
+const { Panel } = Collapse;
 
 interface Holiday {
   id: string;
@@ -15,6 +16,15 @@ interface Holiday {
   open_time?: string;
   close_time?: string;
 }
+
+interface DayOverride {
+  day: string;
+  min_techs: number | null;
+  max_techs: number | null;
+}
+
+const daysOfWeek = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+const dayLabels = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
 export const ShopSettings: React.FC = () => {
   const [currentShopId, setCurrentShopId] = useState<string | null>(null);
@@ -51,6 +61,17 @@ export const ShopSettings: React.FC = () => {
     respect_day_off: true,
     respect_hours_limits: true,
   });
+  
+  const [enableAdvancedOverrides, setEnableAdvancedOverrides] = useState(false);
+  const [dayOverrides, setDayOverrides] = useState<DayOverride[]>(
+    daysOfWeek.map(day => ({ day, min_techs: null, max_techs: null }))
+  );
+  
+  const [shiftTypeLimits, setShiftTypeLimits] = useState({
+    morning: { min: 1, max: 3, enabled: false },
+    mid: { min: 1, max: 3, enabled: false },
+    late: { min: 1, max: 3, enabled: false },
+  });
 
   useEffect(() => {
     const shopId = localStorage.getItem("currentShopId");
@@ -66,7 +87,7 @@ export const ShopSettings: React.FC = () => {
       .from("shop_settings")
       .select("*")
       .eq("shop_id", shopId)
-      .maybeSingle(); // Use maybeSingle instead of single to avoid 406 error
+      .maybeSingle();
 
     if (error) {
       console.error("Error loading settings:", error);
@@ -85,6 +106,16 @@ export const ShopSettings: React.FC = () => {
       }
       setHolidays(data.holidays || []);
       setAutoRules(data.auto_schedule_rules || autoRules);
+      
+      if (data.advanced_settings) {
+        setEnableAdvancedOverrides(data.advanced_settings.enable || false);
+        if (data.advanced_settings.day_overrides) {
+          setDayOverrides(data.advanced_settings.day_overrides);
+        }
+        if (data.advanced_settings.shift_type_limits) {
+          setShiftTypeLimits(data.advanced_settings.shift_type_limits);
+        }
+      }
     }
     setLoading(false);
   };
@@ -102,7 +133,12 @@ export const ShopSettings: React.FC = () => {
       };
     });
 
-    // Use upsert with onConflict to handle duplicates properly
+    const advanced_settings = {
+      enable: enableAdvancedOverrides,
+      day_overrides: dayOverrides,
+      shift_type_limits: shiftTypeLimits,
+    };
+
     const { error } = await supabaseClient
       .from("shop_settings")
       .upsert({
@@ -111,6 +147,7 @@ export const ShopSettings: React.FC = () => {
         operational_hours: formattedHours,
         holidays: holidays,
         auto_schedule_rules: autoRules,
+        advanced_settings: advanced_settings,
         updated_at: new Date().toISOString(),
       }, {
         onConflict: 'shop_id',
@@ -138,8 +175,44 @@ export const ShopSettings: React.FC = () => {
     setHolidays(holidays.filter((h) => h.id !== id));
   };
 
-  const days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
-  const dayLabels = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  const updateDayOverride = (day: string, field: 'min_techs' | 'max_techs', value: number | null) => {
+    setDayOverrides(prev => prev.map(d => 
+      d.day === day ? { ...d, [field]: value } : d
+    ));
+  };
+
+  const updateShiftTypeLimit = (shift: 'morning' | 'mid' | 'late', field: 'min' | 'max' | 'enabled', value: number | boolean) => {
+    setShiftTypeLimits(prev => ({
+      ...prev,
+      [shift]: { ...prev[shift], [field]: value }
+    }));
+  };
+
+  const getEffectiveMinTechs = (day: string, shiftType?: string): number => {
+    if (shiftType && shiftTypeLimits[shiftType as keyof typeof shiftTypeLimits]?.enabled) {
+      return shiftTypeLimits[shiftType as keyof typeof shiftTypeLimits].min;
+    }
+    if (enableAdvancedOverrides) {
+      const override = dayOverrides.find(d => d.day === day);
+      if (override && override.min_techs !== null && override.min_techs !== undefined) {
+        return override.min_techs;
+      }
+    }
+    return autoRules.min_techs_per_shift;
+  };
+
+  const getEffectiveMaxTechs = (day: string, shiftType?: string): number => {
+    if (shiftType && shiftTypeLimits[shiftType as keyof typeof shiftTypeLimits]?.enabled) {
+      return shiftTypeLimits[shiftType as keyof typeof shiftTypeLimits].max;
+    }
+    if (enableAdvancedOverrides) {
+      const override = dayOverrides.find(d => d.day === day);
+      if (override && override.max_techs !== null && override.max_techs !== undefined) {
+        return override.max_techs;
+      }
+    }
+    return autoRules.max_techs_per_shift;
+  };
 
   return (
     <div style={{ padding: "24px" }}>
@@ -169,7 +242,7 @@ export const ShopSettings: React.FC = () => {
         <Tabs defaultActiveKey="workweek" style={{ color: "#E5E7EB" }}>
           <TabPane tab="Work Week" key="workweek">
             <Row gutter={[16, 16]}>
-              {days.map((day, index) => (
+              {daysOfWeek.map((day, index) => (
                 <Col span={6} key={day}>
                   <div
                     style={{
@@ -196,7 +269,7 @@ export const ShopSettings: React.FC = () => {
 
           <TabPane tab="Operational Hours" key="hours">
             <div style={{ maxHeight: "500px", overflowY: "auto" }}>
-              {days.map((day, index) => (
+              {daysOfWeek.map((day, index) => (
                 <div
                   key={day}
                   style={{
@@ -329,11 +402,10 @@ export const ShopSettings: React.FC = () => {
                   borderRadius: "8px",
                 }}
               >
-                <Text style={{ color: "#E5E7EB", display: "block", marginBottom: "8px" }}>Minimum technicians per shift</Text>
-                <Input
-                  type="number"
+                <Text style={{ color: "#E5E7EB", display: "block", marginBottom: "8px" }}>Default Minimum technicians per shift</Text>
+                <InputNumber
                   value={autoRules.min_techs_per_shift}
-                  onChange={(e) => setAutoRules({ ...autoRules, min_techs_per_shift: parseInt(e.target.value) || 1 })}
+                  onChange={(val) => setAutoRules({ ...autoRules, min_techs_per_shift: val || 1 })}
                   min={0}
                   max={10}
                   style={{ width: "100px" }}
@@ -347,11 +419,10 @@ export const ShopSettings: React.FC = () => {
                   borderRadius: "8px",
                 }}
               >
-                <Text style={{ color: "#E5E7EB", display: "block", marginBottom: "8px" }}>Maximum technicians per shift</Text>
-                <Input
-                  type="number"
+                <Text style={{ color: "#E5E7EB", display: "block", marginBottom: "8px" }}>Default Maximum technicians per shift</Text>
+                <InputNumber
                   value={autoRules.max_techs_per_shift}
-                  onChange={(e) => setAutoRules({ ...autoRules, max_techs_per_shift: parseInt(e.target.value) || 3 })}
+                  onChange={(val) => setAutoRules({ ...autoRules, max_techs_per_shift: val || 3 })}
                   min={1}
                   max={20}
                   style={{ width: "100px" }}
@@ -389,6 +460,123 @@ export const ShopSettings: React.FC = () => {
                   />
                 </div>
               </div>
+            </div>
+          </TabPane>
+
+          <TabPane tab="Advanced Overrides" key="advanced">
+            <Alert
+              message="Advanced Overrides"
+              description="These settings override the default min/max technician values for specific days or shift types."
+              type="info"
+              showIcon
+              style={{ marginBottom: "16px", background: "rgba(46,125,50,0.2)", borderColor: "#2E7D32" }}
+            />
+            
+            <div style={{ marginBottom: "24px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+                <Text style={{ color: "#E5E7EB", fontSize: "16px" }}>Enable Advanced Overrides</Text>
+                <Switch
+                  checked={enableAdvancedOverrides}
+                  onChange={setEnableAdvancedOverrides}
+                  checkedChildren="ON"
+                  unCheckedChildren="OFF"
+                />
+              </div>
+              
+              {enableAdvancedOverrides && (
+                <>
+                  <Collapse style={{ marginBottom: "16px", background: "rgba(255,255,255,0.05)" }}>
+                    <Panel header={<span style={{ color: "#E5E7EB" }}>Day-Specific Overrides</span>} key="day">
+                      <Table
+                        dataSource={dayOverrides}
+                        rowKey="day"
+                        pagination={false}
+                        columns={[
+                          { title: "Day", dataIndex: "day", key: "day", render: (day: string) => dayLabels[daysOfWeek.indexOf(day)] },
+                          {
+                            title: "Min Technicians",
+                            key: "min_techs",
+                            render: (_: any, record: DayOverride) => (
+                              <InputNumber
+                                value={record.min_techs}
+                                onChange={(val) => updateDayOverride(record.day, 'min_techs', val)}
+                                min={0}
+                                max={10}
+                                placeholder="Use default"
+                                style={{ width: "120px" }}
+                              />
+                            ),
+                          },
+                          {
+                            title: "Max Technicians",
+                            key: "max_techs",
+                            render: (_: any, record: DayOverride) => (
+                              <InputNumber
+                                value={record.max_techs}
+                                onChange={(val) => updateDayOverride(record.day, 'max_techs', val)}
+                                min={1}
+                                max={20}
+                                placeholder="Use default"
+                                style={{ width: "120px" }}
+                              />
+                            ),
+                          },
+                        ]}
+                      />
+                    </Panel>
+                  </Collapse>
+                  
+                  <Collapse style={{ background: "rgba(255,255,255,0.05)" }}>
+                    <Panel header={<span style={{ color: "#E5E7EB" }}>Shift-Type Overrides</span>} key="shift">
+                      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                        {(['morning', 'mid', 'late'] as const).map((shift) => (
+                          <div
+                            key={shift}
+                            style={{
+                              padding: "12px",
+                              background: "rgba(255,255,255,0.03)",
+                              borderRadius: "8px",
+                            }}
+                          >
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                              <Text style={{ color: "#E5E7EB", fontWeight: "bold", textTransform: "capitalize" }}>{shift} Shift</Text>
+                              <Switch
+                                checked={shiftTypeLimits[shift].enabled}
+                                onChange={(checked) => updateShiftTypeLimit(shift, 'enabled', checked)}
+                                size="small"
+                              />
+                            </div>
+                            {shiftTypeLimits[shift].enabled && (
+                              <Space>
+                                <div>
+                                  <Text style={{ color: "#9CA3AF", fontSize: "12px", display: "block" }}>Min Techs</Text>
+                                  <InputNumber
+                                    value={shiftTypeLimits[shift].min}
+                                    onChange={(val) => updateShiftTypeLimit(shift, 'min', val || 1)}
+                                    min={0}
+                                    max={10}
+                                    size="small"
+                                  />
+                                </div>
+                                <div>
+                                  <Text style={{ color: "#9CA3AF", fontSize: "12px", display: "block" }}>Max Techs</Text>
+                                  <InputNumber
+                                    value={shiftTypeLimits[shift].max}
+                                    onChange={(val) => updateShiftTypeLimit(shift, 'max', val || 3)}
+                                    min={1}
+                                    max={20}
+                                    size="small"
+                                  />
+                                </div>
+                              </Space>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </Panel>
+                  </Collapse>
+                </>
+              )}
             </div>
           </TabPane>
         </Tabs>
