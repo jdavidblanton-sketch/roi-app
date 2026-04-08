@@ -90,7 +90,7 @@ const getMonthWeeks = (offset: number = 0) => {
   return weeks;
 };
 
-const calculateShiftHours = (shiftType: string, operationalHours: { open: string | null; close: string | null }): number => {
+const calculateShiftHours = (operationalHours: { open: string | null; close: string | null }): number => {
   if (!operationalHours.open || !operationalHours.close) return 0;
   
   const openHour = parseFloat(operationalHours.open.split(":")[0]) + parseFloat(operationalHours.open.split(":")[1]) / 60;
@@ -118,7 +118,7 @@ const calculateTotalHours = (
     if (shiftValue === "off") continue;
     
     const dayHours = operationalHours[day.dayKey as keyof OperationalHours];
-    total += calculateShiftHours(shiftValue, dayHours);
+    total += calculateShiftHours(dayHours);
   }
   return total;
 };
@@ -236,12 +236,6 @@ const distributeShifts = (
     
     if (availableTechs.length === 0) continue;
     
-    // Track assigned techs per shift
-    const shiftAssignments: Record<string, string[]> = {};
-    for (const shift of availableShifts) {
-      shiftAssignments[shift] = [];
-    }
-    
     // Assign each shift type
     for (const shift of availableShifts) {
       const minTechs = getEffectiveMinTechs(day.dayKey, shift, autoRules.min_techs_per_shift, advancedSettings);
@@ -252,13 +246,12 @@ const distributeShifts = (
         !newSchedule[tech.id][day.date] || newSchedule[tech.id][day.date] === "off"
       );
       
-      // Determine how many to assign (at least min, at most max, but not more than available)
+      // Determine how many to assign
       const toAssign = Math.min(maxTechs, unassignedTechs.length, Math.max(minTechs, Math.ceil(availableTechs.length / availableShifts.length)));
       
       for (let i = 0; i < toAssign && i < unassignedTechs.length; i++) {
         const tech = unassignedTechs[i];
         newSchedule[tech.id][day.date] = shift;
-        shiftAssignments[shift].push(tech.id);
       }
     }
   }
