@@ -35,6 +35,16 @@ interface WorkWeek {
   sunday: boolean;
 }
 
+interface AdvancedSettings {
+  enable: boolean;
+  day_overrides: { day: string; min_techs: number | null; max_techs: number | null }[];
+  shift_type_limits: {
+    morning: { min: number; max: number; enabled: boolean };
+    mid: { min: number; max: number; enabled: boolean };
+    late: { min: number; max: number; enabled: boolean };
+  };
+}
+
 const daysOfWeek = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 const dayLabels = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
@@ -80,11 +90,35 @@ const getMonthWeeks = (offset: number = 0) => {
   return weeks;
 };
 
-const calculateTotalHours = (techId: string, schedule: Record<string, Record<string, string>>, dates: any[]) => {
+const calculateShiftHours = (shiftType: string, operationalHours: { open: string | null; close: string | null }): number => {
+  if (!operationalHours.open || !operationalHours.close) return 0;
+  
+  const openHour = parseFloat(operationalHours.open.split(":")[0]) + parseFloat(operationalHours.open.split(":")[1]) / 60;
+  const closeHour = parseFloat(operationalHours.close.split(":")[0]) + parseFloat(operationalHours.close.split(":")[1]) / 60;
+  const totalOpenHours = closeHour - openHour;
+  
+  // For short days, the shift takes the entire open hours minus lunch
+  if (totalOpenHours < 8) {
+    return Math.max(0, totalOpenHours - 0.5);
+  }
+  
+  // For full days, standard shifts are 8 hours
+  return 8;
+};
+
+const calculateTotalHours = (
+  techId: string, 
+  schedule: Record<string, Record<string, string>>, 
+  dates: any[],
+  operationalHours: OperationalHours
+) => {
   let total = 0;
   for (const day of dates) {
     const shiftValue = schedule[techId]?.[day.date] || "off";
-    if (shiftValue === "morning" || shiftValue === "mid" || shiftValue === "late") total += 8;
+    if (shiftValue === "off") continue;
+    
+    const dayHours = operationalHours[day.dayKey as keyof OperationalHours];
+    total += calculateShiftHours(shiftValue, dayHours);
   }
   return total;
 };
@@ -100,18 +134,15 @@ const getAvailableShiftsForDay = (operationalHours: { open: string | null; close
   
   const availableShifts: string[] = [];
   
-  // Less than 4 hours open - no shifts
   if (totalOpenHours < 4) {
     return [];
   }
   
-  // Half day (4-8 hours) - only one shift fits
   if (totalOpenHours >= 4 && totalOpenHours < 8) {
     availableShifts.push("morning");
     return availableShifts;
   }
   
-  // Full day (8+ hours) - can support multiple shifts
   if (totalOpenHours >= 8) {
     if (openHour <= 7.5 && closeHour >= 16.0) {
       availableShifts.push("morning");
@@ -131,11 +162,49 @@ const getAvailableShiftsForDay = (operationalHours: { open: string | null; close
   return availableShifts;
 };
 
+const getEffectiveMinTechs = (
+  day: string, 
+  shiftType: string, 
+  defaultMin: number,
+  advancedSettings: AdvancedSettings | null
+): number => {
+  if (advancedSettings?.enable) {
+    if (advancedSettings.shift_type_limits?.[shiftType as keyof typeof advancedSettings.shift_type_limits]?.enabled) {
+      return advancedSettings.shift_type_limits[shiftType as keyof typeof advancedSettings.shift_type_limits].min;
+    }
+    const dayOverride = advancedSettings.day_overrides?.find((d) => d.day === day);
+    if (dayOverride && dayOverride.min_techs !== null && dayOverride.min_techs !== undefined) {
+      return dayOverride.min_techs;
+    }
+  }
+  return defaultMin;
+};
+
+const getEffectiveMaxTechs = (
+  day: string, 
+  shiftType: string, 
+  defaultMax: number,
+  advancedSettings: AdvancedSettings | null
+): number => {
+  if (advancedSettings?.enable) {
+    if (advancedSettings.shift_type_limits?.[shiftType as keyof typeof advancedSettings.shift_type_limits]?.enabled) {
+      return advancedSettings.shift_type_limits[shiftType as keyof typeof advancedSettings.shift_type_limits].max;
+    }
+    const dayOverride = advancedSettings.day_overrides?.find((d) => d.day === day);
+    if (dayOverride && dayOverride.max_techs !== null && dayOverride.max_techs !== undefined) {
+      return dayOverride.max_techs;
+    }
+  }
+  return defaultMax;
+};
+
 const distributeShifts = (
   technicians: Technician[],
   dates: any[],
   operationalHours: OperationalHours,
-  workWeek: WorkWeek
+  workWeek: WorkWeek,
+  autoRules: { min_techs_per_shift: number; max_techs_per_shift: number },
+  advancedSettings: AdvancedSettings | null
 ): Record<string, Record<string, string>> => {
   const newSchedule: Record<string, Record<string, string>> = {};
   
@@ -167,11 +236,30 @@ const distributeShifts = (
     
     if (availableTechs.length === 0) continue;
     
-    for (let i = 0; i < availableShifts.length; i++) {
-      const shift = availableShifts[i];
-      const techIndex = i % availableTechs.length;
-      const tech = availableTechs[techIndex];
-      newSchedule[tech.id][day.date] = shift;
+    // Track assigned techs per shift
+    const shiftAssignments: Record<string, string[]> = {};
+    for (const shift of availableShifts) {
+      shiftAssignments[shift] = [];
+    }
+    
+    // Assign each shift type
+    for (const shift of availableShifts) {
+      const minTechs = getEffectiveMinTechs(day.dayKey, shift, autoRules.min_techs_per_shift, advancedSettings);
+      const maxTechs = getEffectiveMaxTechs(day.dayKey, shift, autoRules.max_techs_per_shift, advancedSettings);
+      
+      // Get unassigned techs for this day
+      const unassignedTechs = availableTechs.filter(tech => 
+        !newSchedule[tech.id][day.date] || newSchedule[tech.id][day.date] === "off"
+      );
+      
+      // Determine how many to assign (at least min, at most max, but not more than available)
+      const toAssign = Math.min(maxTechs, unassignedTechs.length, Math.max(minTechs, Math.ceil(availableTechs.length / availableShifts.length)));
+      
+      for (let i = 0; i < toAssign && i < unassignedTechs.length; i++) {
+        const tech = unassignedTechs[i];
+        newSchedule[tech.id][day.date] = shift;
+        shiftAssignments[shift].push(tech.id);
+      }
     }
   }
   
@@ -222,7 +310,12 @@ const rotateShifts = (
 
 export const Schedule: React.FC = () => {
   const [technicians, setTechnicians] = useState<Technician[]>([]);
-  const [shopSettings, setShopSettings] = useState<{ work_week: WorkWeek; operational_hours: OperationalHours } | null>(null);
+  const [shopSettings, setShopSettings] = useState<{ 
+    work_week: WorkWeek; 
+    operational_hours: OperationalHours; 
+    auto_schedule_rules: any; 
+    advanced_settings: AdvancedSettings | null 
+  } | null>(null);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [viewMode, setViewMode] = useState<"weekly" | "monthly" | "rotational">("weekly");
   const [currentOffset, setCurrentOffset] = useState(0);
@@ -276,6 +369,8 @@ export const Schedule: React.FC = () => {
         settings = {
           work_week: settingsData.work_week,
           operational_hours: settingsData.operational_hours,
+          auto_schedule_rules: settingsData.auto_schedule_rules || { min_techs_per_shift: 1, max_techs_per_shift: 3, respect_day_off: true, respect_hours_limits: true },
+          advanced_settings: settingsData.advanced_settings || null,
         };
       } else {
         settings = {
@@ -289,6 +384,8 @@ export const Schedule: React.FC = () => {
             saturday: { open: "08:00", close: "16:00" },
             sunday: { open: null, close: null },
           },
+          auto_schedule_rules: { min_techs_per_shift: 1, max_techs_per_shift: 3, respect_day_off: true, respect_hours_limits: true },
+          advanced_settings: null,
         };
       }
       setShopSettings(settings);
@@ -337,17 +434,19 @@ export const Schedule: React.FC = () => {
     const dates = viewMode === "monthly" ? monthWeeks.flatMap(w => w.dates) : weekDates;
     const operationalHours = shopSettings.operational_hours;
     const workWeek = shopSettings.work_week;
+    const autoRules = shopSettings.auto_schedule_rules;
+    const advancedSettings = shopSettings.advanced_settings;
     
     let newSchedule: Record<string, Record<string, string>>;
     
     if (viewMode === "rotational") {
       newSchedule = rotateShifts(technicians, dates, operationalHours, workWeek);
     } else {
-      newSchedule = distributeShifts(technicians, dates, operationalHours, workWeek);
+      newSchedule = distributeShifts(technicians, dates, operationalHours, workWeek, autoRules, advancedSettings);
     }
     
     setSchedule(newSchedule);
-    message.success(viewMode === "rotational" ? "Rotational schedule generated." : "Auto-schedule applied.");
+    message.success(viewMode === "rotational" ? "Rotational schedule generated." : "Auto-schedule applied with advanced overrides.");
   };
 
   const handleSaveSchedule = async () => {
@@ -416,14 +515,24 @@ export const Schedule: React.FC = () => {
         );
       },
     })),
-    { title: "Hrs", dataIndex: "hours", key: "hours", width: 50, render: (_: any, record: any) => calculateTotalHours(record.id, schedule, displayDates) },
+    { 
+      title: "Hrs", 
+      dataIndex: "hours", 
+      key: "hours", 
+      width: 50, 
+      render: (_: any, record: any) => {
+        if (!shopSettings) return 0;
+        const total = calculateTotalHours(record.id, schedule, displayDates, shopSettings.operational_hours);
+        return <span>{total.toFixed(1)}</span>;
+      }
+    },
   ];
 
   const dataSource = technicians.map((tech) => ({
     key: tech.id,
     id: tech.id,
     name: `${tech.first_name.charAt(0)}${tech.last_name.charAt(0)}`,
-    hours: calculateTotalHours(tech.id, schedule, displayDates),
+    hours: shopSettings ? calculateTotalHours(tech.id, schedule, displayDates, shopSettings.operational_hours) : 0,
   }));
 
   return (
