@@ -89,7 +89,6 @@ const calculateTotalHours = (techId: string, schedule: Record<string, Record<str
   return total;
 };
 
-// Get available shifts based on operational hours for a day
 const getAvailableShiftsForDay = (operationalHours: { open: string | null; close: string | null }) => {
   if (!operationalHours.open || !operationalHours.close) {
     return [];
@@ -97,37 +96,41 @@ const getAvailableShiftsForDay = (operationalHours: { open: string | null; close
   
   const openHour = parseFloat(operationalHours.open.split(":")[0]) + parseFloat(operationalHours.open.split(":")[1]) / 60;
   const closeHour = parseFloat(operationalHours.close.split(":")[0]) + parseFloat(operationalHours.close.split(":")[1]) / 60;
-  const shiftDuration = 8; // 8 hour shift plus 0.5 lunch = 8.5 total, but we schedule 8 hours
-  
-  // Calculate shift start times that fit within operational hours
-  // Shift must start at least 30 min after open and end at least 30 min before close
-  const earliestStart = openHour + 0.5; // 30 min after open
-  const latestStart = closeHour - shiftDuration - 0.5; // Must end 30 min before close
+  const totalOpenHours = closeHour - openHour;
   
   const availableShifts: string[] = [];
   
-  // Morning shift (7:30am default, but adjust to shop hours)
-  if (earliestStart <= 7.5 && latestStart >= 7.5) {
-    availableShifts.push("morning");
-  }
-  // Mid shift (8:30am default)
-  if (earliestStart <= 8.5 && latestStart >= 8.5) {
-    availableShifts.push("mid");
-  }
-  // Late shift (9:30am default)
-  if (earliestStart <= 9.5 && latestStart >= 9.5) {
-    availableShifts.push("late");
+  // Less than 4 hours open - no shifts
+  if (totalOpenHours < 4) {
+    return [];
   }
   
-  // If no standard shifts fit, create a custom shift starting at earliestStart
-  if (availableShifts.length === 0 && earliestStart < latestStart) {
-    availableShifts.push("morning"); // Use morning as fallback
+  // Half day (4-8 hours) - only one shift fits
+  if (totalOpenHours >= 4 && totalOpenHours < 8) {
+    availableShifts.push("morning");
+    return availableShifts;
+  }
+  
+  // Full day (8+ hours) - can support multiple shifts
+  if (totalOpenHours >= 8) {
+    if (openHour <= 7.5 && closeHour >= 16.0) {
+      availableShifts.push("morning");
+    }
+    if (openHour <= 8.5 && closeHour >= 17.0) {
+      availableShifts.push("mid");
+    }
+    if (openHour <= 9.5 && closeHour >= 18.0) {
+      availableShifts.push("late");
+    }
+    
+    if (availableShifts.length === 0) {
+      availableShifts.push("morning");
+    }
   }
   
   return availableShifts;
 };
 
-// Distribute shifts evenly among technicians
 const distributeShifts = (
   technicians: Technician[],
   dates: any[],
@@ -136,7 +139,6 @@ const distributeShifts = (
 ): Record<string, Record<string, string>> => {
   const newSchedule: Record<string, Record<string, string>> = {};
   
-  // Initialize empty schedule
   for (const tech of technicians) {
     newSchedule[tech.id] = {};
     for (const day of dates) {
@@ -144,7 +146,6 @@ const distributeShifts = (
     }
   }
   
-  // For each day, assign shifts to technicians who are available
   for (const day of dates) {
     const dayKey = day.dayKey as keyof WorkWeek;
     const isShopOpenDay = workWeek[dayKey];
@@ -157,18 +158,15 @@ const distributeShifts = (
     
     const availableShifts = getAvailableShiftsForDay(dayHours);
     if (availableShifts.length === 0) {
-      // No shifts fit, keep everyone off
       continue;
     }
     
-    // Find technicians available this day (not on day off)
     const availableTechs = technicians.filter(tech => 
       tech.primary_day_off !== day.name && tech.secondary_day_off !== day.name
     );
     
     if (availableTechs.length === 0) continue;
     
-    // Assign each shift type to a technician
     for (let i = 0; i < availableShifts.length; i++) {
       const shift = availableShifts[i];
       const techIndex = i % availableTechs.length;
@@ -180,7 +178,6 @@ const distributeShifts = (
   return newSchedule;
 };
 
-// Rotate shifts for rotational mode
 const rotateShifts = (
   technicians: Technician[],
   dates: any[],
