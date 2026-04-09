@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Card, Switch, TimePicker, Button, Space, message, Tabs, Table, Popconfirm, Input, Row, Col, Typography, InputNumber, Collapse, Alert, Divider, Select, Tooltip, Modal, Form, Tag, Checkbox } from "antd";
+import { Card, Switch, TimePicker, Button, Space, message, Tabs, Table, Popconfirm, Input, Row, Col, Typography, InputNumber, Collapse, Alert, Divider, Select, Tooltip, Modal, Form, Tag } from "antd";
 import { PlusOutlined, DeleteOutlined, SaveOutlined, CopyOutlined, QuestionCircleOutlined, ThunderboltOutlined } from "@ant-design/icons";
 import { supabaseClient } from "../utils";
 import dayjs, { Dayjs } from "dayjs";
@@ -338,7 +338,7 @@ export const ShopSettings: React.FC = () => {
       render: (_: any, record: DayOverride) => (
         <InputNumber
           value={record.min_techs}
-          onChange={(val) => updateDayOverride(record.day, 'min_techs', val)}
+          onChange={(val: number | null) => updateDayOverride(record.day, 'min_techs', val)}
           min={0}
           max={10}
           placeholder="Use default"
@@ -352,7 +352,7 @@ export const ShopSettings: React.FC = () => {
       render: (_: any, record: DayOverride) => (
         <InputNumber
           value={record.max_techs}
-          onChange={(val) => updateDayOverride(record.day, 'max_techs', val)}
+          onChange={(val: number | null) => updateDayOverride(record.day, 'max_techs', val)}
           min={1}
           max={20}
           placeholder="Use default"
@@ -364,14 +364,14 @@ export const ShopSettings: React.FC = () => {
 
   const autoScheduleShiftColumns = [
     { title: "Shift Name", dataIndex: "name", key: "name" },
-    { title: "Time", key: "time", render: (_, record: ShiftTemplate) => `${record.start_time}-${record.end_time}` },
+    { title: "Time", key: "time", render: (_: any, record: ShiftTemplate) => `${record.start_time}-${record.end_time}` },
     {
       title: "Use in Auto-Schedule",
       key: "use_in_auto_schedule",
-      render: (_, record: ShiftTemplate) => (
+      render: (_: any, record: ShiftTemplate) => (
         <Switch
           checked={record.use_in_auto_schedule !== false}
-          onChange={(checked) => handleUpdateAutoScheduleShifts(record.id, checked)}
+          onChange={(checked: boolean) => handleUpdateAutoScheduleShifts(record.id, checked)}
         />
       ),
     },
@@ -428,7 +428,7 @@ export const ShopSettings: React.FC = () => {
                     <span style={{ color: "#E5E7EB" }}>{dayLabels[index]}</span>
                     <Switch
                       checked={workWeek[day as keyof typeof workWeek]}
-                      onChange={(checked) => setWorkWeek({ ...workWeek, [day]: checked })}
+                      onChange={(checked: boolean) => setWorkWeek({ ...workWeek, [day]: checked })}
                       checkedChildren="Open"
                       unCheckedChildren="Closed"
                     />
@@ -473,7 +473,7 @@ export const ShopSettings: React.FC = () => {
                   { 
                     title: "Display", 
                     key: "display", 
-                    render: (_, record) => {
+                    render: (_: any, record: ShiftTemplate) => {
                       if (record.name && !["Morning", "Mid", "Late"].includes(record.name)) {
                         return <Tag color="blue">{record.name}</Tag>;
                       }
@@ -558,7 +558,7 @@ export const ShopSettings: React.FC = () => {
                     <Space>
                       <TimePicker
                         value={operationalHours[day as keyof OperationalHoursState]?.open}
-                        onChange={(time) =>
+                        onChange={(time: Dayjs | null) =>
                           setOperationalHours({
                             ...operationalHours,
                             [day]: { ...operationalHours[day as keyof OperationalHoursState], open: time },
@@ -570,7 +570,7 @@ export const ShopSettings: React.FC = () => {
                       <span style={{ color: "#E5E7EB" }}>to</span>
                       <TimePicker
                         value={operationalHours[day as keyof OperationalHoursState]?.close}
-                        onChange={(time) =>
+                        onChange={(time: Dayjs | null) =>
                           setOperationalHours({
                             ...operationalHours,
                             [day]: { ...operationalHours[day as keyof OperationalHoursState], close: time },
@@ -595,20 +595,20 @@ export const ShopSettings: React.FC = () => {
                   <Input
                     placeholder="Holiday name (e.g., Christmas)"
                     value={newHoliday.name}
-                    onChange={(e) => setNewHoliday({ ...newHoliday, name: e.target.value })}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewHoliday({ ...newHoliday, name: e.target.value })}
                   />
                 </Col>
                 <Col span={6}>
                   <Input
                     type="date"
                     value={newHoliday.date}
-                    onChange={(e) => setNewHoliday({ ...newHoliday, date: e.target.value })}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewHoliday({ ...newHoliday, date: e.target.value })}
                   />
                 </Col>
                 <Col span={4}>
                   <Switch
                     checked={newHoliday.is_closed}
-                    onChange={(checked) => setNewHoliday({ ...newHoliday, is_closed: checked })}
+                    onChange={(checked: boolean) => setNewHoliday({ ...newHoliday, is_closed: checked })}
                     checkedChildren="Closed"
                     unCheckedChildren="Reduced Hours"
                   />
@@ -617,14 +617,14 @@ export const ShopSettings: React.FC = () => {
                   <>
                     <Col span={3}>
                       <TimePicker
-                        onChange={(time) => setNewHoliday({ ...newHoliday, open_time: time?.format("HH:mm") || "" })}
+                        onChange={(time: Dayjs | null) => setNewHoliday({ ...newHoliday, open_time: time?.format("HH:mm") || "" })}
                         format="HH:mm"
                         placeholder="Open"
                       />
                     </Col>
                     <Col span={3}>
                       <TimePicker
-                        onChange={(time) => setNewHoliday({ ...newHoliday, close_time: time?.format("HH:mm") || "" })}
+                        onChange={(time: Dayjs | null) => setNewHoliday({ ...newHoliday, close_time: time?.format("HH:mm") || "" })}
                         format="HH:mm"
                         placeholder="Close"
                       />
@@ -682,7 +682,7 @@ export const ShopSettings: React.FC = () => {
                 </div>
                 <InputNumber
                   value={autoRules.default_shift_hours}
-                  onChange={(val) => setAutoRules({ ...autoRules, default_shift_hours: val || 8.5 })}
+                  onChange={(val: number | null) => setAutoRules({ ...autoRules, default_shift_hours: val || 8.5 })}
                   min={1}
                   max={12}
                   step={0.5}
@@ -706,7 +706,7 @@ export const ShopSettings: React.FC = () => {
                 </div>
                 <InputNumber
                   value={autoRules.default_lunch_minutes}
-                  onChange={(val) => setAutoRules({ ...autoRules, default_lunch_minutes: val || 30 })}
+                  onChange={(val: number | null) => setAutoRules({ ...autoRules, default_lunch_minutes: val || 30 })}
                   min={0}
                   max={120}
                   step={15}
@@ -731,7 +731,7 @@ export const ShopSettings: React.FC = () => {
                 </div>
                 <InputNumber
                   value={autoRules.min_techs_per_shift}
-                  onChange={(val) => setAutoRules({ ...autoRules, min_techs_per_shift: val || 1 })}
+                  onChange={(val: number | null) => setAutoRules({ ...autoRules, min_techs_per_shift: val || 1 })}
                   min={0}
                   max={10}
                   style={{ width: "100px" }}
@@ -753,7 +753,7 @@ export const ShopSettings: React.FC = () => {
                 </div>
                 <InputNumber
                   value={autoRules.max_techs_per_shift}
-                  onChange={(val) => setAutoRules({ ...autoRules, max_techs_per_shift: val || 3 })}
+                  onChange={(val: number | null) => setAutoRules({ ...autoRules, max_techs_per_shift: val || 3 })}
                   min={1}
                   max={20}
                   style={{ width: "100px" }}
@@ -775,7 +775,7 @@ export const ShopSettings: React.FC = () => {
                 </div>
                 <Switch
                   checked={autoRules.respect_day_off && isDayOffRespected}
-                  onChange={(checked) => setAutoRules({ ...autoRules, respect_day_off: checked })}
+                  onChange={(checked: boolean) => setAutoRules({ ...autoRules, respect_day_off: checked })}
                   disabled={!isDayOffRespected}
                 />
                 {!isDayOffRespected && (
@@ -800,7 +800,7 @@ export const ShopSettings: React.FC = () => {
                 </div>
                 <Switch
                   checked={autoRules.respect_hours_limits}
-                  onChange={(checked) => setAutoRules({ ...autoRules, respect_hours_limits: checked })}
+                  onChange={(checked: boolean) => setAutoRules({ ...autoRules, respect_hours_limits: checked })}
                 />
               </div>
               <Divider style={{ borderColor: "rgba(255,255,255,0.1)" }} />
@@ -820,7 +820,7 @@ export const ShopSettings: React.FC = () => {
                 </div>
                 <Switch
                   checked={autoRules.manual_override_enabled}
-                  onChange={(checked) => setAutoRules({ ...autoRules, manual_override_enabled: checked })}
+                  onChange={(checked: boolean) => setAutoRules({ ...autoRules, manual_override_enabled: checked })}
                 />
               </div>
               {autoRules.manual_override_enabled && (
@@ -834,7 +834,7 @@ export const ShopSettings: React.FC = () => {
                   <Text style={{ color: "#E5E7EB", display: "block", marginBottom: "8px" }}>Override Duration (weeks)</Text>
                   <InputNumber
                     value={autoRules.manual_override_weeks}
-                    onChange={(val) => setAutoRules({ ...autoRules, manual_override_weeks: val || 0 })}
+                    onChange={(val: number | null) => setAutoRules({ ...autoRules, manual_override_weeks: val || 0 })}
                     min={0}
                     max={52}
                     style={{ width: "100px" }}
@@ -896,7 +896,7 @@ export const ShopSettings: React.FC = () => {
                               <Text style={{ color: "#E5E7EB", fontWeight: "bold", textTransform: "capitalize" }}>{shift} Shift</Text>
                               <Switch
                                 checked={shiftTypeLimits[shift].enabled}
-                                onChange={(checked) => updateShiftTypeLimit(shift, 'enabled', checked)}
+                                onChange={(checked: boolean) => updateShiftTypeLimit(shift, 'enabled', checked)}
                                 size="small"
                               />
                             </div>
@@ -906,7 +906,7 @@ export const ShopSettings: React.FC = () => {
                                   <Text style={{ color: "#9CA3AF", fontSize: "12px", display: "block" }}>Min Techs</Text>
                                   <InputNumber
                                     value={shiftTypeLimits[shift].min}
-                                    onChange={(val) => updateShiftTypeLimit(shift, 'min', val || 1)}
+                                    onChange={(val: number | null) => updateShiftTypeLimit(shift, 'min', val || 1)}
                                     min={0}
                                     max={10}
                                     size="small"
@@ -916,7 +916,7 @@ export const ShopSettings: React.FC = () => {
                                   <Text style={{ color: "#9CA3AF", fontSize: "12px", display: "block" }}>Max Techs</Text>
                                   <InputNumber
                                     value={shiftTypeLimits[shift].max}
-                                    onChange={(val) => updateShiftTypeLimit(shift, 'max', val || 3)}
+                                    onChange={(val: number | null) => updateShiftTypeLimit(shift, 'max', val || 3)}
                                     min={1}
                                     max={20}
                                     size="small"
