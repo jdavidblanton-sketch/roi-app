@@ -47,6 +47,14 @@ interface ShiftTemplate {
   is_default: boolean;
 }
 
+interface DailyShiftSetting {
+  day: string;
+  template_id: string | null;
+  custom_name: string | null;
+  custom_start: string | null;
+  custom_end: string | null;
+}
+
 interface AdvancedSettings {
   enable: boolean;
   day_overrides: { day: string; min_techs: number | null; max_techs: number | null }[];
@@ -107,18 +115,22 @@ const isHoliday = (date: string, holidays: Holiday[]): Holiday | undefined => {
   return holidays.find(h => h.date === date);
 };
 
-// Get display text for a shift - shows time range if no custom name, otherwise shows custom name
-const getShiftDisplay = (template: ShiftTemplate | null, customName?: string): string => {
-  if (customName) return customName;
-  if (template) {
-    // If template has a custom name (not default like "Morning"), use it
-    if (template.name && !["Morning", "Mid", "Late"].includes(template.name)) {
-      return template.name;
-    }
-    // Otherwise show time range
-    return `${template.start_time}-${template.end_time}`;
+// Get display text for a shift - shows time range unless operator designated a custom name
+const getShiftDisplay = (template: ShiftTemplate | null, dailySetting?: DailyShiftSetting): string => {
+  if (!template) return "WORK";
+  
+  // If daily setting has a custom name, use it
+  if (dailySetting?.custom_name) {
+    return dailySetting.custom_name;
   }
-  return "WORK";
+  
+  // If template has a custom name (not default "Morning", "Mid", "Late"), use it
+  if (template.name && !["Morning", "Mid", "Late"].includes(template.name)) {
+    return template.name;
+  }
+  
+  // Otherwise show time range
+  return `${template.start_time}-${template.end_time}`;
 };
 
 const getEffectiveDayInfo = (
@@ -126,7 +138,7 @@ const getEffectiveDayInfo = (
   workWeek: WorkWeek,
   holidays: Holiday[],
   shiftTemplates: ShiftTemplate[],
-  dailyShiftSettings: any[]
+  dailyShiftSettings: DailyShiftSetting[]
 ): { isOpen: boolean; shiftDisplay: string; shiftTemplateId: string | null; isReducedHoliday: boolean; holidayName?: string } => {
   const dayKey = day.dayKey as keyof WorkWeek;
   
@@ -150,11 +162,11 @@ const getEffectiveDayInfo = (
     }
   }
   
-  const dailySetting = dailyShiftSettings?.find((d: any) => d.day === day.dayKey);
+  const dailySetting = dailyShiftSettings?.find((d: DailyShiftSetting) => d.day === day.dayKey);
   if (dailySetting?.template_id) {
     const template = shiftTemplates.find(t => t.id === dailySetting.template_id);
     if (template) {
-      const display = getShiftDisplay(template, dailySetting.custom_name);
+      const display = getShiftDisplay(template, dailySetting);
       return {
         isOpen: true,
         shiftDisplay: display,
@@ -164,7 +176,6 @@ const getEffectiveDayInfo = (
     }
   }
   
-  // Default: use first template or show WORK
   const defaultTemplate = shiftTemplates.find(t => t.is_default) || shiftTemplates[0];
   if (defaultTemplate) {
     const display = getShiftDisplay(defaultTemplate);
@@ -229,7 +240,7 @@ const generateSchedule = (
   workWeek: WorkWeek,
   holidays: Holiday[],
   shiftTemplates: ShiftTemplate[],
-  dailyShiftSettings: any[],
+  dailyShiftSettings: DailyShiftSetting[],
   autoRules: AutoRules,
   advancedSettings: AdvancedSettings | null
 ): { schedule: Record<string, Record<string, string>>; weeklyHours: Record<string, number>; weeklyPay: Record<string, number>; totalPay: number; warnings: string[]; holidayWarnings: string[] } => {
@@ -353,7 +364,7 @@ export const Schedule: React.FC = () => {
   const [technicians, setTechnicians] = useState<Technician[]>([]);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [shiftTemplates, setShiftTemplates] = useState<ShiftTemplate[]>([]);
-  const [dailyShiftSettings, setDailyShiftSettings] = useState<any[]>([]);
+  const [dailyShiftSettings, setDailyShiftSettings] = useState<DailyShiftSetting[]>([]);
   const [shopSettings, setShopSettings] = useState<{ 
     work_week: WorkWeek; 
     auto_schedule_rules: AutoRules; 
@@ -670,11 +681,10 @@ export const Schedule: React.FC = () => {
     return weeklyHours[techId] || 0;
   };
 
-  // Build shift options from templates - show time ranges
+  // Build shift options from templates - show time ranges or custom names
   const getShiftOptions = () => {
     const options = [{ value: "off", label: "OFF", display: "OFF" }];
     for (const template of shiftTemplates) {
-      // Show time range unless operator has set a custom name in settings
       let display = `${template.start_time}-${template.end_time}`;
       if (template.name && !["Morning", "Mid", "Late"].includes(template.name)) {
         display = template.name;
