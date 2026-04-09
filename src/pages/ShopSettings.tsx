@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { Card, Switch, TimePicker, Button, Space, message, Tabs, Table, Popconfirm, Input, Row, Col, Typography, InputNumber, Collapse, Alert, Divider, Select, Tooltip, Modal, Form, Tag } from "antd";
-import { PlusOutlined, DeleteOutlined, SaveOutlined, CopyOutlined, QuestionCircleOutlined } from "@ant-design/icons";
+import { Card, Switch, TimePicker, Button, Space, message, Tabs, Table, Popconfirm, Input, Row, Col, Typography, InputNumber, Collapse, Alert, Divider, Select, Tooltip, Modal, Form, Tag, Checkbox } from "antd";
+import { PlusOutlined, DeleteOutlined, SaveOutlined, CopyOutlined, QuestionCircleOutlined, ThunderboltOutlined } from "@ant-design/icons";
 import { supabaseClient } from "../utils";
 import dayjs, { Dayjs } from "dayjs";
 
@@ -30,6 +30,7 @@ interface ShiftTemplate {
   start_time: string;
   end_time: string;
   is_default: boolean;
+  use_in_auto_schedule?: boolean;
 }
 
 interface OperationalHoursState {
@@ -45,10 +46,10 @@ interface OperationalHoursState {
 const daysOfWeek = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 const dayLabels = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
-const defaultShiftTemplates: ShiftTemplate[] = [
-  { id: "1", name: "Morning", start_time: "07:30", end_time: "16:00", is_default: true },
-  { id: "2", name: "Mid", start_time: "08:30", end_time: "17:00", is_default: false },
-  { id: "3", name: "Late", start_time: "09:30", end_time: "18:00", is_default: false },
+const DEFAULT_SHIFT_TEMPLATES: ShiftTemplate[] = [
+  { id: "1", name: "Morning", start_time: "07:30", end_time: "16:00", is_default: true, use_in_auto_schedule: true },
+  { id: "2", name: "Mid", start_time: "08:30", end_time: "17:00", is_default: false, use_in_auto_schedule: true },
+  { id: "3", name: "Late", start_time: "09:30", end_time: "18:00", is_default: false, use_in_auto_schedule: true },
 ];
 
 const getInitialDayOverrides = (): DayOverride[] => {
@@ -78,7 +79,7 @@ export const ShopSettings: React.FC = () => {
     sunday: { open: null, close: null },
   });
   
-  const [shiftTemplates, setShiftTemplates] = useState<ShiftTemplate[]>(defaultShiftTemplates);
+  const [shiftTemplates, setShiftTemplates] = useState<ShiftTemplate[]>(DEFAULT_SHIFT_TEMPLATES);
   const [templateModalVisible, setTemplateModalVisible] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<ShiftTemplate | null>(null);
   const [templateForm] = Form.useForm();
@@ -144,8 +145,10 @@ export const ShopSettings: React.FC = () => {
         setOperationalHours(hours);
       }
       
-      if (data.shift_templates) {
+      if (data.shift_templates && data.shift_templates.length > 0) {
         setShiftTemplates(data.shift_templates);
+      } else {
+        setShiftTemplates(DEFAULT_SHIFT_TEMPLATES);
       }
       
       setHolidays(data.holidays || []);
@@ -280,6 +283,7 @@ export const ShopSettings: React.FC = () => {
         start_time: startTime,
         end_time: endTime,
         is_default: false,
+        use_in_auto_schedule: false,
       };
       setShiftTemplates([...shiftTemplates, newTemplate]);
       message.success("Shift template added");
@@ -306,6 +310,12 @@ export const ShopSettings: React.FC = () => {
     });
     setOperationalHours(newHours);
     message.success("Hours copied to all open days");
+  };
+
+  const handleUpdateAutoScheduleShifts = (templateId: string, useInAutoSchedule: boolean) => {
+    setShiftTemplates(shiftTemplates.map(t => 
+      t.id === templateId ? { ...t, use_in_auto_schedule: useInAutoSchedule } : t
+    ));
   };
 
   const getOpenDaysCount = (): number => {
@@ -347,6 +357,21 @@ export const ShopSettings: React.FC = () => {
           max={20}
           placeholder="Use default"
           style={{ width: "120px" }}
+        />
+      ),
+    },
+  ];
+
+  const autoScheduleShiftColumns = [
+    { title: "Shift Name", dataIndex: "name", key: "name" },
+    { title: "Time", key: "time", render: (_, record: ShiftTemplate) => `${record.start_time}-${record.end_time}` },
+    {
+      title: "Use in Auto-Schedule",
+      key: "use_in_auto_schedule",
+      render: (_, record: ShiftTemplate) => (
+        <Switch
+          checked={record.use_in_auto_schedule !== false}
+          onChange={(checked) => handleUpdateAutoScheduleShifts(record.id, checked)}
         />
       ),
     },
@@ -423,7 +448,7 @@ export const ShopSettings: React.FC = () => {
           <TabPane tab="Shift Templates" key="shift_templates">
             <Alert
               message="Shift Templates"
-              description="Define shifts that technicians can be assigned to. The default shift will be used for auto-scheduling."
+              description="Define shifts that technicians can be assigned to. Use the toggle below to select which shifts are used by auto-schedule."
               type="info"
               showIcon
               style={{ marginBottom: "16px", background: "rgba(46,125,50,0.2)", borderColor: "#2E7D32" }}
@@ -470,6 +495,28 @@ export const ShopSettings: React.FC = () => {
                   },
                 ]}
               />
+            </div>
+
+            <Divider style={{ borderColor: "rgba(255,255,255,0.1)", margin: "16px 0" }} />
+
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px" }}>
+                <ThunderboltOutlined style={{ color: "#E5E7EB" }} />
+                <Text style={{ color: "#E5E7EB", fontSize: "16px" }}>Auto-Schedule Shift Selection</Text>
+                <Tooltip title="Select which shifts the auto-schedule system should use when generating schedules">
+                  <QuestionCircleOutlined style={{ color: "#9CA3AF" }} />
+                </Tooltip>
+              </div>
+              <Table
+                dataSource={shiftTemplates}
+                rowKey="id"
+                pagination={false}
+                size="small"
+                columns={autoScheduleShiftColumns}
+              />
+              <Text type="secondary" style={{ fontSize: "12px", display: "block", marginTop: "8px" }}>
+                Only shifts with "Use in Auto-Schedule" enabled will be assigned by the auto-schedule system.
+              </Text>
             </div>
           </TabPane>
 
