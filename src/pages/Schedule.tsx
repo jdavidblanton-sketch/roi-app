@@ -114,24 +114,12 @@ const getPaidHoursPerShift = (defaultShiftHours: number, lunchMinutes: number): 
   return defaultShiftHours - (lunchMinutes / 60);
 };
 
-// Get display time for a shift (just the shift name or configured time)
-const getShiftDisplay = (shiftTemplateId: string | null, shiftTemplates: ShiftTemplate[]): string => {
-  if (!shiftTemplateId) return "WORK";
-  const template = shiftTemplates.find(t => t.id === shiftTemplateId);
-  if (template) {
-    // Show just the shift name, not the times
-    return template.name;
-  }
-  return "WORK";
-};
-
 const isHoliday = (date: string, holidays: Holiday[]): Holiday | undefined => {
   return holidays.find(h => h.date === date);
 };
 
 const getEffectiveDayInfo = (
   day: any,
-  operationalHours: OperationalHours,
   workWeek: WorkWeek,
   holidays: Holiday[],
   shiftTemplates: ShiftTemplate[],
@@ -253,8 +241,8 @@ const generateSchedule = (
   const respectDayOff = autoRules.respect_day_off && openDaysCount > 5;
   
   for (const day of dates) {
-    const { isOpen, shiftDisplay, shiftTemplateId, isReducedHoliday, holidayName } = getEffectiveDayInfo(
-      day, {} as OperationalHours, workWeek, holidays, shiftTemplates, dailyShiftSettings
+    const { isOpen, shiftDisplay, isReducedHoliday, holidayName } = getEffectiveDayInfo(
+      day, workWeek, holidays, shiftTemplates, dailyShiftSettings
     );
     
     if (!isOpen) {
@@ -303,7 +291,6 @@ const generateSchedule = (
     const toAssign = Math.min(maxTechs, availableTechs.length);
     for (let i = 0; i < toAssign; i++) {
       const tech = availableTechs[i];
-      // Store the shift display name (e.g., "Morning", "Mid", "Late")
       schedule[tech.id][day.date] = shiftDisplay;
       weeklyHours[tech.id] += paidHoursPerShift;
     }
@@ -313,13 +300,12 @@ const generateSchedule = (
     for (const tech of technicians) {
       if (tech.min_hours > 0 && weeklyHours[tech.id] < tech.min_hours) {
         let neededHours = tech.min_hours - weeklyHours[tech.id];
-        const shiftsNeeded = Math.ceil(neededHours / paidHoursPerShift);
         
         for (const day of dates) {
-          if (shiftsNeeded <= 0) break;
+          if (neededHours <= 0) break;
           
           const { isOpen, shiftDisplay } = getEffectiveDayInfo(
-            day, {} as OperationalHours, workWeek, holidays, shiftTemplates, dailyShiftSettings
+            day, workWeek, holidays, shiftTemplates, dailyShiftSettings
           );
           
           if (!isOpen) continue;
@@ -334,6 +320,7 @@ const generateSchedule = (
           
           schedule[tech.id][day.date] = shiftDisplay;
           weeklyHours[tech.id] += paidHoursPerShift;
+          neededHours -= paidHoursPerShift;
         }
       }
     }
@@ -691,7 +678,7 @@ export const Schedule: React.FC = () => {
     { title: "Tech", dataIndex: "name", key: "name", fixed: "left" as const, width: 120 },
     ...weekDates.map((day) => {
       const dayInfo = shopSettings ? getEffectiveDayInfo(
-        day, {} as OperationalHours, shopSettings.work_week, holidays, shiftTemplates, dailyShiftSettings
+        day, shopSettings.work_week, holidays, shiftTemplates, dailyShiftSettings
       ) : { isOpen: true, shiftDisplay: "WORK", shiftTemplateId: null, isReducedHoliday: false };
       
       return {
@@ -759,7 +746,7 @@ export const Schedule: React.FC = () => {
     const days = monthDays.map(day => {
       const shiftValue = schedule[tech.id]?.[day.date] || "off";
       const dayInfo = shopSettings ? getEffectiveDayInfo(
-        day, {} as OperationalHours, shopSettings.work_week, holidays, shiftTemplates, dailyShiftSettings
+        day, shopSettings.work_week, holidays, shiftTemplates, dailyShiftSettings
       ) : { isOpen: true, shiftDisplay: "WORK", shiftTemplateId: null, isReducedHoliday: false };
       
       let displayText = "OFF";
