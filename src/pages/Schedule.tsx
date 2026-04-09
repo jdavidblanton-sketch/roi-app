@@ -2,7 +2,6 @@ import React, { useState, useEffect } from "react";
 import { Table, Button, Select, Card, message, Switch, Space, Radio, Modal, Checkbox, Tag, Tooltip, Alert } from "antd";
 import { SaveOutlined, ThunderboltOutlined, LeftOutlined, RightOutlined, CopyOutlined, WarningOutlined } from "@ant-design/icons";
 import { supabaseClient } from "../utils";
-import dayjs from "dayjs";
 
 const { Option } = Select;
 
@@ -44,13 +43,6 @@ interface Holiday {
   is_closed: boolean;
   open_time?: string;
   close_time?: string;
-}
-
-interface ShiftTemplate {
-  id: string;
-  name: string;
-  start_time: string;
-  end_time: string;
 }
 
 interface AdvancedSettings {
@@ -112,16 +104,12 @@ const getMonthWeeks = (offset: number = 0) => {
   return weeks;
 };
 
-const getDayHoursDecimal = (openTime: string | null, closeTime: string | null): number => {
+const getDayHours = (openTime: string | null, closeTime: string | null): number => {
   if (!openTime || !closeTime) return 0;
   const openHour = parseFloat(openTime.split(":")[0]) + parseFloat(openTime.split(":")[1]) / 60;
   const closeHour = parseFloat(closeTime.split(":")[0]) + parseFloat(closeTime.split(":")[1]) / 60;
   const totalHours = closeHour - openHour;
   return Math.max(0, totalHours - 0.5);
-};
-
-const getDayHours = (openTime: string | null, closeTime: string | null): number => {
-  return getDayHoursDecimal(openTime, closeTime);
 };
 
 const getTimeDisplay = (openTime: string | null, closeTime: string | null): string => {
@@ -137,66 +125,49 @@ const getEffectiveDayInfo = (
   day: any,
   operationalHours: OperationalHours,
   workWeek: WorkWeek,
-  holidays: Holiday[],
-  shiftTemplates: ShiftTemplate[],
-  dailyShiftSettings: any[]
-): { isOpen: boolean; hours: number; timeDisplay: string; openTime: string | null; closeTime: string | null } => {
+  holidays: Holiday[]
+): { isOpen: boolean; hours: number; timeDisplay: string; openTime: string | null; closeTime: string | null; isReducedHoliday: boolean; holidayName?: string } => {
   const dayKey = day.dayKey as keyof WorkWeek;
   
   // Priority 1: Shop Closed
   if (!workWeek[dayKey]) {
-    return { isOpen: false, hours: 0, timeDisplay: "Shop Closed", openTime: null, closeTime: null };
+    return { isOpen: false, hours: 0, timeDisplay: "Shop Closed", openTime: null, closeTime: null, isReducedHoliday: false };
   }
   
   // Priority 2: Holiday
   const holiday = isHoliday(day.date, holidays);
   if (holiday) {
     if (holiday.is_closed) {
-      return { isOpen: false, hours: 0, timeDisplay: "Holiday - Closed", openTime: null, closeTime: null };
+      return { isOpen: false, hours: 0, timeDisplay: "Holiday - Closed", openTime: null, closeTime: null, isReducedHoliday: false, holidayName: holiday.name };
     }
     if (holiday.open_time && holiday.close_time) {
       const hours = getDayHours(holiday.open_time, holiday.close_time);
       return { 
         isOpen: true, 
         hours: hours, 
-        timeDisplay: `${holiday.open_time} - ${holiday.close_time} (Holiday)`,
+        timeDisplay: `${holiday.open_time} - ${holiday.close_time}`,
         openTime: holiday.open_time,
-        closeTime: holiday.close_time
+        closeTime: holiday.close_time,
+        isReducedHoliday: true,
+        holidayName: holiday.name
       };
     }
   }
   
-  // Priority 3: Check daily shift setting or default template
-  const dailySetting = dailyShiftSettings?.find((d: any) => d.day === day.dayKey);
-  let openTime: string | null = null;
-  let closeTime: string | null = null;
-  
-  if (dailySetting?.template_id) {
-    const template = shiftTemplates.find(t => t.id === dailySetting.template_id);
-    if (template) {
-      openTime = template.start_time;
-      closeTime = template.end_time;
-    }
+  // Normal day
+  const dayHours = operationalHours[day.dayKey as keyof OperationalHours];
+  if (!dayHours?.open || !dayHours?.close) {
+    return { isOpen: false, hours: 0, timeDisplay: "No hours set", openTime: null, closeTime: null, isReducedHoliday: false };
   }
   
-  // Fallback to operational hours
-  if (!openTime) {
-    const dayHours = operationalHours[day.dayKey as keyof OperationalHours];
-    openTime = dayHours?.open || null;
-    closeTime = dayHours?.close || null;
-  }
-  
-  if (!openTime || !closeTime) {
-    return { isOpen: false, hours: 0, timeDisplay: "No hours set", openTime: null, closeTime: null };
-  }
-  
-  const hours = getDayHours(openTime, closeTime);
+  const hours = getDayHours(dayHours.open, dayHours.close);
   return { 
     isOpen: true, 
     hours: hours, 
-    timeDisplay: getTimeDisplay(openTime, closeTime),
-    openTime: openTime,
-    closeTime: closeTime
+    timeDisplay: getTimeDisplay(dayHours.open, dayHours.close),
+    openTime: dayHours.open,
+    closeTime: dayHours.close,
+    isReducedHoliday: false
   };
 };
 
@@ -234,13 +205,12 @@ const generateSchedule = (
   operationalHours: OperationalHours,
   workWeek: WorkWeek,
   holidays: Holiday[],
-  shiftTemplates: ShiftTemplate[],
-  dailyShiftSettings: any[],
   autoRules: AutoRules,
   advancedSettings: AdvancedSettings | null
-): { schedule: Record<string, Record<string, string>>; warnings: string[] } => {
+): { schedule: Record<string, Record<string, string>>; warnings: string[]; holidayWarnings: string[] } => {
   const schedule: Record<string, Record<string, string>> = {};
   const warnings: string[] = [];
+  const holidayWarnings: string[] = [];
   
   // Initialize all techs to OFF for all days
   for (const tech of technicians) {
@@ -261,12 +231,17 @@ const generateSchedule = (
   
   // Process each day
   for (const day of dates) {
-    const { isOpen, hours, openTime, closeTime } = getEffectiveDayInfo(
-      day, operationalHours, workWeek, holidays, shiftTemplates, dailyShiftSettings
+    const { isOpen, hours, openTime, closeTime, isReducedHoliday, holidayName } = getEffectiveDayInfo(
+      day, operationalHours, workWeek, holidays
     );
     
     if (!isOpen) {
       continue;
+    }
+    
+    // Alert for reduced holiday hours
+    if (isReducedHoliday) {
+      holidayWarnings.push(`${day.name} (${day.date}) - ${holidayName} has reduced hours: ${openTime}-${closeTime}. Please review and adjust schedule manually if needed.`);
     }
     
     let minTechs = getEffectiveMinTechs(day.dayKey, autoRules.min_techs_per_shift, advancedSettings);
@@ -312,6 +287,7 @@ const generateSchedule = (
     const toAssign = Math.min(maxTechs, availableTechs.length);
     for (let i = 0; i < toAssign; i++) {
       const tech = availableTechs[i];
+      // Store the actual time range for display
       schedule[tech.id][day.date] = openTime && closeTime ? `${openTime}-${closeTime}` : "work";
       weeklyHours[tech.id] += hours;
     }
@@ -327,7 +303,7 @@ const generateSchedule = (
           if (neededHours <= 0) break;
           
           const { isOpen, hours, openTime, closeTime } = getEffectiveDayInfo(
-            day, operationalHours, workWeek, holidays, shiftTemplates, dailyShiftSettings
+            day, operationalHours, workWeek, holidays
           );
           
           if (!isOpen) continue;
@@ -348,14 +324,12 @@ const generateSchedule = (
     }
   }
   
-  return { schedule, warnings };
+  return { schedule, warnings, holidayWarnings };
 };
 
 export const Schedule: React.FC = () => {
   const [technicians, setTechnicians] = useState<Technician[]>([]);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
-  const [shiftTemplates, setShiftTemplates] = useState<ShiftTemplate[]>([]);
-  const [dailyShiftSettings, setDailyShiftSettings] = useState<any[]>([]);
   const [shopSettings, setShopSettings] = useState<{ 
     work_week: WorkWeek; 
     operational_hours: OperationalHours; 
@@ -369,6 +343,7 @@ export const Schedule: React.FC = () => {
   const [monthWeeks, setMonthWeeks] = useState(getMonthWeeks(0));
   const [schedule, setSchedule] = useState<Record<string, Record<string, string>>>({});
   const [warnings, setWarnings] = useState<string[]>([]);
+  const [holidayWarnings, setHolidayWarnings] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [autoMode, setAutoMode] = useState(false);
   const [currentShopId, setCurrentShopId] = useState<string | null>(null);
@@ -420,8 +395,6 @@ export const Schedule: React.FC = () => {
           advanced_settings: settingsData.advanced_settings || null,
         };
         setHolidays(settingsData.holidays || []);
-        setShiftTemplates(settingsData.shift_templates || []);
-        setDailyShiftSettings(settingsData.daily_shift_settings || []);
       } else {
         settings = {
           work_week: { monday: true, tuesday: true, wednesday: true, thursday: true, friday: true, saturday: false, sunday: false },
@@ -438,8 +411,6 @@ export const Schedule: React.FC = () => {
           advanced_settings: null,
         };
         setHolidays([]);
-        setShiftTemplates([]);
-        setDailyShiftSettings([]);
       }
       setShopSettings(settings);
       setSettingsLoaded(true);
@@ -491,15 +462,17 @@ export const Schedule: React.FC = () => {
     const advancedSettings = shopSettings.advanced_settings;
     
     const result = generateSchedule(
-      technicians, dates, operationalHours, workWeek, holidays, 
-      shiftTemplates, dailyShiftSettings, autoRules, advancedSettings
+      technicians, dates, operationalHours, workWeek, holidays, autoRules, advancedSettings
     );
     
     setSchedule(result.schedule);
     setWarnings(result.warnings);
+    setHolidayWarnings(result.holidayWarnings);
     
-    if (result.warnings.length > 0) {
-      message.warning(`Schedule generated with ${result.warnings.length} warning(s). Check the alert banner.`);
+    if (result.holidayWarnings.length > 0) {
+      message.warning(`Reduced holiday hours detected. Please review the schedule for ${result.holidayWarnings.length} day(s).`);
+    } else if (result.warnings.length > 0) {
+      message.warning(`Schedule generated with ${result.warnings.length} warning(s).`);
     } else {
       message.success("Schedule generated successfully.");
     }
@@ -553,7 +526,7 @@ export const Schedule: React.FC = () => {
       const shiftValue = schedule[techId]?.[day.date] || "off";
       if (shiftValue !== "off") {
         const { hours } = getEffectiveDayInfo(
-          day, shopSettings.operational_hours, shopSettings.work_week, holidays, shiftTemplates, dailyShiftSettings
+          day, shopSettings.operational_hours, shopSettings.work_week, holidays
         );
         total += hours;
       }
@@ -567,8 +540,8 @@ export const Schedule: React.FC = () => {
     { title: "Tech", dataIndex: "name", key: "name", fixed: "left" as const, width: 120 },
     ...displayDates.map((day) => {
       const dayInfo = shopSettings ? getEffectiveDayInfo(
-        day, shopSettings.operational_hours, shopSettings.work_week, holidays, shiftTemplates, dailyShiftSettings
-      ) : { isOpen: true, hours: 0, timeDisplay: "", openTime: null, closeTime: null };
+        day, shopSettings.operational_hours, shopSettings.work_week, holidays
+      ) : { isOpen: true, hours: 0, timeDisplay: "", openTime: null, closeTime: null, isReducedHoliday: false };
       
       return {
         title: (
@@ -589,7 +562,8 @@ export const Schedule: React.FC = () => {
             return <Tag color="red" style={{ width: "100%", textAlign: "center" }}>CLOSED</Tag>;
           }
           
-          const displayValue = shiftValue !== "off" && shiftValue !== "work" ? shiftValue : "WORK";
+          // Show the actual time range if stored, otherwise show the day's hours
+          const displayValue = shiftValue !== "off" ? shiftValue : dayInfo.timeDisplay;
           
           return (
             <Select
@@ -599,7 +573,7 @@ export const Schedule: React.FC = () => {
               size="small"
             >
               <Option value="off">OFF</Option>
-              <Option value="work">WORK ({dayInfo.timeDisplay})</Option>
+              <Option value="work">{dayInfo.timeDisplay}</Option>
             </Select>
           );
         },
@@ -628,9 +602,6 @@ export const Schedule: React.FC = () => {
     name: `${tech.first_name} ${tech.last_name}`,
   }));
 
-  const openDaysCount = shopSettings ? Object.values(shopSettings.work_week).filter(v => v === true).length : 5;
-  const isDayOffRespected = openDaysCount > 5;
-
   return (
     <div style={{ padding: "24px" }}>
       <Card style={{ background: "rgba(0,0,0,0.65)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: "16px" }}>
@@ -658,19 +629,24 @@ export const Schedule: React.FC = () => {
           </Space>
         </div>
         
-        {/* Priority Legend */}
-        <div style={{ marginBottom: "16px", padding: "8px", background: "rgba(255,255,255,0.05)", borderRadius: "8px" }}>
-          <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", fontSize: "11px" }}>
-            <span><Tag color="green">Priority 1</Tag> Shop Hours</span>
-            <span><Tag color="green">Priority 2</Tag> Holidays</span>
-            <span><Tag color="green">Priority 3</Tag> Min Techs Required</span>
-            <span><Tag color={isDayOffRespected ? "green" : "orange"}>Priority 4</Tag> Day Off {isDayOffRespected ? "Respected" : "Ignored (≤5 days open)"}</span>
-            <span><Tag color="green">Priority 5</Tag> Max Hours Limit</span>
-            <span><Tag color="green">Priority 6</Tag> Min Hours (adds shifts if needed)</span>
-          </div>
-        </div>
-        
         {/* Warnings Banner */}
+        {holidayWarnings.length > 0 && (
+          <Alert
+            message="Reduced Holiday Hours"
+            description={
+              <ul style={{ margin: 0, paddingLeft: 20 }}>
+                {holidayWarnings.map((w, i) => <li key={i}>{w}</li>)}
+              </ul>
+            }
+            type="warning"
+            showIcon
+            icon={<WarningOutlined />}
+            closable
+            onClose={() => setHolidayWarnings([])}
+            style={{ marginBottom: "16px", background: "rgba(230,81,0,0.2)", borderColor: "#E65100" }}
+          />
+        )}
+        
         {warnings.length > 0 && (
           <Alert
             message="Scheduling Warnings"
