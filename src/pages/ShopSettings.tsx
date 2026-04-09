@@ -3,6 +3,7 @@ import { Card, Switch, TimePicker, Button, Space, message, Tabs, Table, Popconfi
 import { PlusOutlined, DeleteOutlined, SaveOutlined, CopyOutlined, QuestionCircleOutlined, ThunderboltOutlined } from "@ant-design/icons";
 import { supabaseClient } from "../utils";
 import dayjs, { Dayjs } from "dayjs";
+import type { ColumnsType } from "antd/es/table";
 
 const { Title, Text } = Typography;
 const { TabPane } = Tabs;
@@ -325,7 +326,7 @@ export const ShopSettings: React.FC = () => {
   const openDaysCount = getOpenDaysCount();
   const isDayOffRespected = openDaysCount > 5;
 
-  const dayOverrideColumns = [
+  const dayOverrideColumns: ColumnsType<DayOverride> = [
     { 
       title: "Day", 
       dataIndex: "day", 
@@ -362,7 +363,7 @@ export const ShopSettings: React.FC = () => {
     },
   ];
 
-  const autoScheduleShiftColumns = [
+  const autoScheduleShiftColumns: ColumnsType<ShiftTemplate> = [
     { title: "Shift Name", dataIndex: "name", key: "name" },
     { title: "Time", key: "time", render: (_: any, record: ShiftTemplate) => `${record.start_time}-${record.end_time}` },
     {
