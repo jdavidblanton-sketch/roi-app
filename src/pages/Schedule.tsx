@@ -54,6 +54,13 @@ interface AdvancedSettings {
   };
 }
 
+interface AutoRules {
+  min_techs_per_shift: number;
+  max_techs_per_shift: number;
+  respect_day_off: boolean;
+  respect_hours_limits: boolean;
+}
+
 const daysOfWeek = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 const dayLabels = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
@@ -268,7 +275,7 @@ const distributeShifts = (
   operationalHours: OperationalHours,
   workWeek: WorkWeek,
   holidays: Holiday[],
-  autoRules: { min_techs_per_shift: number; max_techs_per_shift: number; respect_hours_limits: boolean },
+  autoRules: AutoRules,
   advancedSettings: AdvancedSettings | null
 ): Record<string, Record<string, string>> => {
   const newSchedule: Record<string, Record<string, string>> = {};
@@ -280,9 +287,6 @@ const distributeShifts = (
       newSchedule[tech.id][day.date] = "off";
     }
   }
-  
-  // First pass: respect day off preferences (only if enabled)
-  const respectDayOff = autoRules.respect_day_off !== false;
   
   // Track weekly hours per tech to enforce min/max
   let weeklyHours: Record<string, number> = {};
@@ -300,7 +304,7 @@ const distributeShifts = (
     
     // Get technicians available this day (respect day off only if enabled)
     let availableTechs = [...technicians];
-    if (respectDayOff) {
+    if (autoRules.respect_day_off) {
       availableTechs = technicians.filter(tech => 
         tech.primary_day_off !== day.name && tech.secondary_day_off !== day.name
       );
@@ -311,9 +315,7 @@ const distributeShifts = (
     // Further filter by min/max hour limits if enabled
     if (autoRules.respect_hours_limits) {
       availableTechs = availableTechs.filter(tech => {
-        const currentHours = weeklyHours[tech.id];
-        const remainingHours = calculateTotalHours(tech.id, newSchedule, dates, operationalHours);
-        // If they've already reached max, don't assign more
+        const remainingHours = weeklyHours[tech.id];
         if (tech.max_hours > 0 && remainingHours >= tech.max_hours) {
           return false;
         }
@@ -386,7 +388,7 @@ const distributeShifts = (
           const { availableShifts, isClosed } = getEffectiveShiftsForDay(day, operationalHours, workWeek, holidays);
           if (isClosed || availableShifts.length === 0) continue;
           
-          const isDayOff = respectDayOff && (tech.primary_day_off === day.name || tech.secondary_day_off === day.name);
+          const isDayOff = autoRules.respect_day_off && (tech.primary_day_off === day.name || tech.secondary_day_off === day.name);
           if (isDayOff) continue;
           
           if (newSchedule[tech.id][day.date] === "off") {
@@ -443,7 +445,7 @@ export const Schedule: React.FC = () => {
   const [shopSettings, setShopSettings] = useState<{ 
     work_week: WorkWeek; 
     operational_hours: OperationalHours; 
-    auto_schedule_rules: any; 
+    auto_schedule_rules: AutoRules; 
     advanced_settings: AdvancedSettings | null 
   } | null>(null);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
