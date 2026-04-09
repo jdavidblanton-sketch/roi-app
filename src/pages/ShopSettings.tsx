@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { Card, Switch, TimePicker, Button, Space, message, Tabs, Table, Popconfirm, Input, Row, Col, Typography, InputNumber, Collapse, Alert, Divider, Select, Tooltip, Modal, Form } from "antd";
-import { PlusOutlined, DeleteOutlined, SaveOutlined, CopyOutlined, SettingOutlined, QuestionCircleOutlined } from "@ant-design/icons";
+import { Card, Switch, TimePicker, Button, Space, message, Tabs, Table, Popconfirm, Input, Row, Col, Typography, InputNumber, Collapse, Alert, Divider, Select, Tooltip, Modal, Form, Tag } from "antd";
+import { PlusOutlined, DeleteOutlined, SaveOutlined, CopyOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import { supabaseClient } from "../utils";
-import dayjs from "dayjs";
+import dayjs, { Dayjs } from "dayjs";
 
 const { Title, Text } = Typography;
 const { TabPane } = Tabs;
@@ -39,6 +39,16 @@ interface DailyShiftSetting {
   custom_end: string | null;
 }
 
+interface OperationalHoursState {
+  monday: { open: Dayjs | null; close: Dayjs | null };
+  tuesday: { open: Dayjs | null; close: Dayjs | null };
+  wednesday: { open: Dayjs | null; close: Dayjs | null };
+  thursday: { open: Dayjs | null; close: Dayjs | null };
+  friday: { open: Dayjs | null; close: Dayjs | null };
+  saturday: { open: Dayjs | null; close: Dayjs | null };
+  sunday: { open: Dayjs | null; close: Dayjs | null };
+}
+
 const daysOfWeek = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 const dayLabels = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
@@ -48,12 +58,10 @@ const defaultShiftTemplates: ShiftTemplate[] = [
   { id: "3", name: "Late", start_time: "09:30", end_time: "18:00", is_default: false },
 ];
 
-// Initialize day overrides with all days
 const getInitialDayOverrides = (): DayOverride[] => {
   return daysOfWeek.map(day => ({ day, min_techs: null, max_techs: null }));
 };
 
-// Initialize daily shift settings
 const getInitialDailyShiftSettings = (): DailyShiftSetting[] => {
   return daysOfWeek.map(day => ({ day, template_id: "1", custom_start: null, custom_end: null }));
 };
@@ -71,8 +79,7 @@ export const ShopSettings: React.FC = () => {
     sunday: false,
   });
   
-  // Operational hours (legacy - will be replaced by shift templates)
-  const [operationalHours, setOperationalHours] = useState({
+  const [operationalHours, setOperationalHours] = useState<OperationalHoursState>({
     monday: { open: dayjs("07:30", "HH:mm"), close: dayjs("16:00", "HH:mm") },
     tuesday: { open: dayjs("07:30", "HH:mm"), close: dayjs("16:00", "HH:mm") },
     wednesday: { open: dayjs("07:30", "HH:mm"), close: dayjs("16:00", "HH:mm") },
@@ -82,7 +89,6 @@ export const ShopSettings: React.FC = () => {
     sunday: { open: null, close: null },
   });
   
-  // Shift templates
   const [shiftTemplates, setShiftTemplates] = useState<ShiftTemplate[]>(defaultShiftTemplates);
   const [dailyShiftSettings, setDailyShiftSettings] = useState<DailyShiftSetting[]>(getInitialDailyShiftSettings());
   const [templateModalVisible, setTemplateModalVisible] = useState(false);
@@ -136,25 +142,22 @@ export const ShopSettings: React.FC = () => {
     } else if (data) {
       setWorkWeek(data.work_week || workWeek);
       
-      // Load operational hours
       if (data.operational_hours) {
-        const hours: any = {};
+        const hours: OperationalHoursState = { ...operationalHours };
         Object.keys(data.operational_hours).forEach((day) => {
-          const h = data.operational_hours[day];
-          hours[day] = {
-            open: h.open ? dayjs(h.open, "HH:mm") : null,
-            close: h.close ? dayjs(h.close, "HH:mm") : null,
+          const h = data.operational_hours[day as keyof typeof data.operational_hours];
+          hours[day as keyof OperationalHoursState] = {
+            open: h?.open ? dayjs(h.open, "HH:mm") : null,
+            close: h?.close ? dayjs(h.close, "HH:mm") : null,
           };
         });
         setOperationalHours(hours);
       }
       
-      // Load shift templates
       if (data.shift_templates) {
         setShiftTemplates(data.shift_templates);
       }
       
-      // Load daily shift settings
       if (data.daily_shift_settings) {
         setDailyShiftSettings(data.daily_shift_settings);
       }
@@ -186,9 +189,10 @@ export const ShopSettings: React.FC = () => {
 
     const formattedHours: any = {};
     Object.keys(operationalHours).forEach((day) => {
+      const hours = operationalHours[day as keyof OperationalHoursState];
       formattedHours[day] = {
-        open: operationalHours[day as keyof typeof operationalHours]?.open?.format("HH:mm") || null,
-        close: operationalHours[day as keyof typeof operationalHours]?.close?.format("HH:mm") || null,
+        open: hours?.open?.format("HH:mm") || null,
+        close: hours?.close?.format("HH:mm") || null,
       };
     });
 
@@ -249,7 +253,6 @@ export const ShopSettings: React.FC = () => {
     }));
   };
 
-  // Shift template functions
   const handleAddTemplate = () => {
     setEditingTemplate(null);
     templateForm.resetFields();
@@ -258,7 +261,11 @@ export const ShopSettings: React.FC = () => {
 
   const handleEditTemplate = (template: ShiftTemplate) => {
     setEditingTemplate(template);
-    templateForm.setFieldsValue(template);
+    templateForm.setFieldsValue({
+      name: template.name,
+      start_time: dayjs(template.start_time, "HH:mm"),
+      end_time: dayjs(template.end_time, "HH:mm"),
+    });
     setTemplateModalVisible(true);
   };
 
@@ -268,15 +275,20 @@ export const ShopSettings: React.FC = () => {
   };
 
   const handleSaveTemplate = (values: any) => {
+    const startTime = values.start_time.format("HH:mm");
+    const endTime = values.end_time.format("HH:mm");
+    
     if (editingTemplate) {
       setShiftTemplates(shiftTemplates.map(t => 
-        t.id === editingTemplate.id ? { ...t, ...values } : t
+        t.id === editingTemplate.id ? { ...t, name: values.name, start_time: startTime, end_time: endTime } : t
       ));
       message.success("Shift template updated");
     } else {
       const newTemplate: ShiftTemplate = {
         id: Date.now().toString(),
-        ...values,
+        name: values.name,
+        start_time: startTime,
+        end_time: endTime,
         is_default: false,
       };
       setShiftTemplates([...shiftTemplates, newTemplate]);
@@ -287,8 +299,8 @@ export const ShopSettings: React.FC = () => {
   };
 
   const handleCopyHoursToAll = (sourceDay: string) => {
-    const sourceHours = operationalHours[sourceDay as keyof typeof operationalHours];
-    if (!sourceHours.open || !sourceHours.close) {
+    const sourceHours = operationalHours[sourceDay as keyof OperationalHoursState];
+    if (!sourceHours?.open || !sourceHours?.close) {
       message.error("Source day has no hours set");
       return;
     }
@@ -296,7 +308,7 @@ export const ShopSettings: React.FC = () => {
     const newHours = { ...operationalHours };
     daysOfWeek.forEach(day => {
       if (workWeek[day as keyof typeof workWeek]) {
-        newHours[day as keyof typeof operationalHours] = {
+        newHours[day as keyof OperationalHoursState] = {
           open: sourceHours.open,
           close: sourceHours.close,
         };
@@ -313,9 +325,8 @@ export const ShopSettings: React.FC = () => {
         d.day === day ? { ...d, template_id: templateId, custom_start: null, custom_end: null } : d
       ));
       
-      // Also update operational hours for backward compatibility
       const newHours = { ...operationalHours };
-      newHours[day as keyof typeof operationalHours] = {
+      newHours[day as keyof OperationalHoursState] = {
         open: dayjs(template.start_time, "HH:mm"),
         close: dayjs(template.end_time, "HH:mm"),
       };
@@ -335,11 +346,10 @@ export const ShopSettings: React.FC = () => {
       }));
       setDailyShiftSettings(newSettings);
       
-      // Also update operational hours for all days
       const newHours = { ...operationalHours };
       daysOfWeek.forEach(day => {
         if (workWeek[day as keyof typeof workWeek]) {
-          newHours[day as keyof typeof operationalHours] = {
+          newHours[day as keyof OperationalHoursState] = {
             open: dayjs(template.start_time, "HH:mm"),
             close: dayjs(template.end_time, "HH:mm"),
           };
@@ -357,7 +367,6 @@ export const ShopSettings: React.FC = () => {
   const openDaysCount = getOpenDaysCount();
   const isDayOffRespected = openDaysCount > 5;
 
-  // Columns for the day overrides table
   const dayOverrideColumns = [
     { 
       title: "Day", 
@@ -586,11 +595,11 @@ export const ShopSettings: React.FC = () => {
                   {workWeek[day as keyof typeof workWeek] ? (
                     <Space>
                       <TimePicker
-                        value={operationalHours[day as keyof typeof operationalHours]?.open}
+                        value={operationalHours[day as keyof OperationalHoursState]?.open}
                         onChange={(time) =>
                           setOperationalHours({
                             ...operationalHours,
-                            [day]: { ...operationalHours[day as keyof typeof operationalHours], open: time },
+                            [day]: { ...operationalHours[day as keyof OperationalHoursState], open: time },
                           })
                         }
                         format="HH:mm"
@@ -598,11 +607,11 @@ export const ShopSettings: React.FC = () => {
                       />
                       <span style={{ color: "#E5E7EB" }}>to</span>
                       <TimePicker
-                        value={operationalHours[day as keyof typeof operationalHours]?.close}
+                        value={operationalHours[day as keyof OperationalHoursState]?.close}
                         onChange={(time) =>
                           setOperationalHours({
                             ...operationalHours,
-                            [day]: { ...operationalHours[day as keyof typeof operationalHours], close: time },
+                            [day]: { ...operationalHours[day as keyof OperationalHoursState], close: time },
                           })
                         }
                         format="HH:mm"
@@ -916,7 +925,6 @@ export const ShopSettings: React.FC = () => {
         </Tabs>
       </Card>
 
-      {/* Shift Template Modal */}
       <Modal
         title={editingTemplate ? "Edit Shift Template" : "Add Shift Template"}
         open={templateModalVisible}
