@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { Table, Button, Select, Card, message, Switch, Space, Radio, Modal, Checkbox, Tag, Tooltip, Alert } from "antd";
-import { SaveOutlined, ThunderboltOutlined, LeftOutlined, RightOutlined, CopyOutlined, WarningOutlined } from "@ant-design/icons";
+import { Table, Button, Select, Card, message, Switch, Space, Radio, Modal, Checkbox, Tag, Tooltip, Alert, InputNumber, Divider, Statistic, Row, Col } from "antd";
+import { SaveOutlined, ThunderboltOutlined, LeftOutlined, RightOutlined, CopyOutlined, WarningOutlined, DollarOutlined, ClockCircleOutlined } from "@ant-design/icons";
 import { supabaseClient } from "../utils";
 
 const { Option } = Select;
@@ -11,6 +11,8 @@ interface Technician {
   last_name: string;
   min_hours: number;
   max_hours: number;
+  pay_rate: number;
+  pay_type: string;
   primary_day_off: string;
   secondary_day_off: string;
   include_in_rotation?: boolean;
@@ -57,10 +59,18 @@ interface AutoRules {
   respect_hours_limits: boolean;
   manual_override_enabled: boolean;
   manual_override_weeks: number;
+  default_shift_hours: number;
+  default_lunch_minutes: number;
 }
 
 const daysOfWeek = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 const dayLabels = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+const shiftOptions = [
+  { value: "morning", label: "Morning", defaultStart: "07:30", defaultEnd: "16:00" },
+  { value: "mid", label: "Mid", defaultStart: "08:30", defaultEnd: "17:00" },
+  { value: "late", label: "Late", defaultStart: "09:30", defaultEnd: "18:00" },
+];
 
 const getWeekDates = (offset: number = 0) => {
   const today = new Date();
@@ -104,12 +114,13 @@ const getMonthWeeks = (offset: number = 0) => {
   return weeks;
 };
 
-const getDayHours = (openTime: string | null, closeTime: string | null): number => {
+const getDayHours = (openTime: string | null, closeTime: string | null, lunchMinutes: number): number => {
   if (!openTime || !closeTime) return 0;
   const openHour = parseFloat(openTime.split(":")[0]) + parseFloat(openTime.split(":")[1]) / 60;
   const closeHour = parseFloat(closeTime.split(":")[0]) + parseFloat(closeTime.split(":")[1]) / 60;
   const totalHours = closeHour - openHour;
-  return Math.max(0, totalHours - 0.5);
+  const lunchHours = lunchMinutes / 60;
+  return Math.max(0, totalHours - lunchHours);
 };
 
 const getTimeDisplay = (openTime: string | null, closeTime: string | null): string => {
@@ -125,23 +136,22 @@ const getEffectiveDayInfo = (
   day: any,
   operationalHours: OperationalHours,
   workWeek: WorkWeek,
-  holidays: Holiday[]
+  holidays: Holiday[],
+  lunchMinutes: number
 ): { isOpen: boolean; hours: number; timeDisplay: string; openTime: string | null; closeTime: string | null; isReducedHoliday: boolean; holidayName?: string } => {
   const dayKey = day.dayKey as keyof WorkWeek;
   
-  // Priority 1: Shop Closed
   if (!workWeek[dayKey]) {
     return { isOpen: false, hours: 0, timeDisplay: "Shop Closed", openTime: null, closeTime: null, isReducedHoliday: false };
   }
   
-  // Priority 2: Holiday
   const holiday = isHoliday(day.date, holidays);
   if (holiday) {
     if (holiday.is_closed) {
       return { isOpen: false, hours: 0, timeDisplay: "Holiday - Closed", openTime: null, closeTime: null, isReducedHoliday: false, holidayName: holiday.name };
     }
     if (holiday.open_time && holiday.close_time) {
-      const hours = getDayHours(holiday.open_time, holiday.close_time);
+      const hours = getDayHours(holiday.open_time, holiday.close_time, lunchMinutes);
       return { 
         isOpen: true, 
         hours: hours, 
@@ -154,13 +164,12 @@ const getEffectiveDayInfo = (
     }
   }
   
-  // Normal day
   const dayHours = operationalHours[day.dayKey as keyof OperationalHours];
   if (!dayHours?.open || !dayHours?.close) {
     return { isOpen: false, hours: 0, timeDisplay: "No hours set", openTime: null, closeTime: null, isReducedHoliday: false };
   }
   
-  const hours = getDayHours(dayHours.open, dayHours.close);
+  const hours = getDayHours(dayHours.open, dayHours.close, lunchMinutes);
   return { 
     isOpen: true, 
     hours: hours, 
@@ -199,6 +208,17 @@ const getEffectiveMaxTechs = (
   return defaultMax;
 };
 
+const calculatePay = (hours: number, payRate: number, payType: string): number => {
+  if (payType === "hourly") {
+    return hours * payRate;
+  } else if (payType === "flat") {
+    return payRate;
+  } else if (payType === "flag") {
+    return hours * payRate;
+  }
+  return hours * payRate;
+};
+
 const generateSchedule = (
   technicians: Technician[],
   dates: any[],
@@ -207,12 +227,11 @@ const generateSchedule = (
   holidays: Holiday[],
   autoRules: AutoRules,
   advancedSettings: AdvancedSettings | null
-): { schedule: Record<string, Record<string, string>>; warnings: string[]; holidayWarnings: string[] } => {
+): { schedule: Record<string, Record<string, string>>; weeklyHours: Record<string, number>; weeklyPay: Record<string, number>; totalPay: number; warnings: string[]; holidayWarnings: string[] } => {
   const schedule: Record<string, Record<string, string>> = {};
   const warnings: string[] = [];
   const holidayWarnings: string[] = [];
   
-  // Initialize all techs to OFF for all days
   for (const tech of technicians) {
     schedule[tech.id] = {};
     for (const day of dates) {
@@ -220,7 +239,6 @@ const generateSchedule = (
     }
   }
   
-  // Track weekly hours per tech
   let weeklyHours: Record<string, number> = {};
   for (const tech of technicians) {
     weeklyHours[tech.id] = 0;
@@ -229,17 +247,15 @@ const generateSchedule = (
   const openDaysCount = Object.values(workWeek).filter(v => v === true).length;
   const respectDayOff = autoRules.respect_day_off && openDaysCount > 5;
   
-  // Process each day
   for (const day of dates) {
     const { isOpen, hours, openTime, closeTime, isReducedHoliday, holidayName } = getEffectiveDayInfo(
-      day, operationalHours, workWeek, holidays
+      day, operationalHours, workWeek, holidays, autoRules.default_lunch_minutes
     );
     
     if (!isOpen) {
       continue;
     }
     
-    // Alert for reduced holiday hours
     if (isReducedHoliday) {
       holidayWarnings.push(`${day.name} (${day.date}) - ${holidayName} has reduced hours: ${openTime}-${closeTime}. Please review and adjust schedule manually if needed.`);
     }
@@ -247,7 +263,6 @@ const generateSchedule = (
     let minTechs = getEffectiveMinTechs(day.dayKey, autoRules.min_techs_per_shift, advancedSettings);
     let maxTechs = getEffectiveMaxTechs(day.dayKey, autoRules.max_techs_per_shift, advancedSettings);
     
-    // Get available technicians
     let availableTechs = [...technicians];
     
     if (respectDayOff) {
@@ -265,10 +280,8 @@ const generateSchedule = (
       });
     }
     
-    // Check if we have enough techs to meet minimum
     if (availableTechs.length < minTechs) {
       warnings.push(`${day.name}: Need ${minTechs} techs but only ${availableTechs.length} available. Consider overriding day off preferences.`);
-      // Override day off to meet minimum
       availableTechs = [...technicians];
       if (autoRules.respect_hours_limits) {
         availableTechs = availableTechs.filter(tech => {
@@ -280,20 +293,16 @@ const generateSchedule = (
       }
     }
     
-    // Sort by current hours (lowest first) for fair distribution
     availableTechs.sort((a, b) => weeklyHours[a.id] - weeklyHours[b.id]);
     
-    // Assign shifts
     const toAssign = Math.min(maxTechs, availableTechs.length);
     for (let i = 0; i < toAssign; i++) {
       const tech = availableTechs[i];
-      // Store the actual time range for display
       schedule[tech.id][day.date] = openTime && closeTime ? `${openTime}-${closeTime}` : "work";
       weeklyHours[tech.id] += hours;
     }
   }
   
-  // Enforce min hours (add shifts if below minimum)
   if (autoRules.respect_hours_limits) {
     for (const tech of technicians) {
       if (tech.min_hours > 0 && weeklyHours[tech.id] < tech.min_hours) {
@@ -303,7 +312,7 @@ const generateSchedule = (
           if (neededHours <= 0) break;
           
           const { isOpen, hours, openTime, closeTime } = getEffectiveDayInfo(
-            day, operationalHours, workWeek, holidays
+            day, operationalHours, workWeek, holidays, autoRules.default_lunch_minutes
           );
           
           if (!isOpen) continue;
@@ -324,7 +333,14 @@ const generateSchedule = (
     }
   }
   
-  return { schedule, warnings, holidayWarnings };
+  const weeklyPay: Record<string, number> = {};
+  let totalPay = 0;
+  for (const tech of technicians) {
+    weeklyPay[tech.id] = calculatePay(weeklyHours[tech.id], tech.pay_rate, tech.pay_type);
+    totalPay += weeklyPay[tech.id];
+  }
+  
+  return { schedule, weeklyHours, weeklyPay, totalPay, warnings, holidayWarnings };
 };
 
 export const Schedule: React.FC = () => {
@@ -342,6 +358,9 @@ export const Schedule: React.FC = () => {
   const [weekDates, setWeekDates] = useState(getWeekDates(0));
   const [monthWeeks, setMonthWeeks] = useState(getMonthWeeks(0));
   const [schedule, setSchedule] = useState<Record<string, Record<string, string>>>({});
+  const [weeklyHours, setWeeklyHours] = useState<Record<string, number>>({});
+  const [weeklyPay, setWeeklyPay] = useState<Record<string, number>>({});
+  const [totalPay, setTotalPay] = useState<number>(0);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [holidayWarnings, setHolidayWarnings] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -349,6 +368,9 @@ export const Schedule: React.FC = () => {
   const [currentShopId, setCurrentShopId] = useState<string | null>(null);
   const [copyModalVisible, setCopyModalVisible] = useState(false);
   const [selectedWeeks, setSelectedWeeks] = useState<number[]>([]);
+  const [settingsModalVisible, setSettingsModalVisible] = useState(false);
+  const [tempShiftHours, setTempShiftHours] = useState<number>(8);
+  const [tempLunchMinutes, setTempLunchMinutes] = useState<number>(30);
 
   useEffect(() => {
     const shopId = localStorage.getItem("currentShopId");
@@ -375,7 +397,7 @@ export const Schedule: React.FC = () => {
     try {
       const { data: techData, error: techError } = await supabaseClient
         .from("technicians")
-        .select("id, first_name, last_name, min_hours, max_hours, primary_day_off, secondary_day_off")
+        .select("id, first_name, last_name, min_hours, max_hours, pay_rate, pay_type, primary_day_off, secondary_day_off")
         .eq("shop_id", shopId);
       if (techError) throw techError;
       setTechnicians(techData || []);
@@ -391,10 +413,23 @@ export const Schedule: React.FC = () => {
         settings = {
           work_week: settingsData.work_week,
           operational_hours: settingsData.operational_hours,
-          auto_schedule_rules: settingsData.auto_schedule_rules || { min_techs_per_shift: 1, max_techs_per_shift: 3, respect_day_off: true, respect_hours_limits: true, manual_override_enabled: false, manual_override_weeks: 0 },
+          auto_schedule_rules: settingsData.auto_schedule_rules || { 
+            min_techs_per_shift: 1, 
+            max_techs_per_shift: 3, 
+            respect_day_off: true, 
+            respect_hours_limits: true, 
+            manual_override_enabled: false, 
+            manual_override_weeks: 0,
+            default_shift_hours: 8,
+            default_lunch_minutes: 30
+          },
           advanced_settings: settingsData.advanced_settings || null,
         };
         setHolidays(settingsData.holidays || []);
+        if (settingsData.auto_schedule_rules) {
+          setTempShiftHours(settingsData.auto_schedule_rules.default_shift_hours || 8);
+          setTempLunchMinutes(settingsData.auto_schedule_rules.default_lunch_minutes || 30);
+        }
       } else {
         settings = {
           work_week: { monday: true, tuesday: true, wednesday: true, thursday: true, friday: true, saturday: false, sunday: false },
@@ -407,7 +442,16 @@ export const Schedule: React.FC = () => {
             saturday: { open: "08:00", close: "16:00" },
             sunday: { open: null, close: null },
           },
-          auto_schedule_rules: { min_techs_per_shift: 1, max_techs_per_shift: 3, respect_day_off: true, respect_hours_limits: true, manual_override_enabled: false, manual_override_weeks: 0 },
+          auto_schedule_rules: { 
+            min_techs_per_shift: 1, 
+            max_techs_per_shift: 3, 
+            respect_day_off: true, 
+            respect_hours_limits: true, 
+            manual_override_enabled: false, 
+            manual_override_weeks: 0,
+            default_shift_hours: 8,
+            default_lunch_minutes: 30
+          },
           advanced_settings: null,
         };
         setHolidays([]);
@@ -442,11 +486,65 @@ export const Schedule: React.FC = () => {
       });
     });
     setSchedule(scheduleMap);
+    
+    // Recalculate hours and pay
+    if (shopSettings) {
+      let tempHours: Record<string, number> = {};
+      let tempPay: Record<string, number> = {};
+      let tempTotal = 0;
+      for (const tech of technicians) {
+        let total = 0;
+        for (const day of dateStrings.map((d, idx) => ({ date: d, dayKey: daysOfWeek[new Date(d).getDay() - 1] }))) {
+          const shiftValue = scheduleMap[tech.id]?.[day.date] || "off";
+          if (shiftValue !== "off") {
+            const dayInfo = getEffectiveDayInfo(
+              { date: day.date, dayKey: day.dayKey, name: dayLabels[daysOfWeek.indexOf(day.dayKey)] },
+              shopSettings.operational_hours,
+              shopSettings.work_week,
+              holidays,
+              shopSettings.auto_schedule_rules.default_lunch_minutes
+            );
+            total += dayInfo.hours;
+          }
+        }
+        tempHours[tech.id] = total;
+        tempPay[tech.id] = calculatePay(total, tech.pay_rate, tech.pay_type);
+        tempTotal += tempPay[tech.id];
+      }
+      setWeeklyHours(tempHours);
+      setWeeklyPay(tempPay);
+      setTotalPay(tempTotal);
+    }
   };
 
   const handleShiftChange = (techId: string, date: string, shiftType: string) => {
     const newSchedule = { ...schedule, [techId]: { ...schedule[techId], [date]: shiftType } };
     setSchedule(newSchedule);
+    
+    // Recalculate hours and pay for this tech
+    if (shopSettings) {
+      let total = 0;
+      const dates = viewMode === "monthly" ? monthWeeks.flatMap(w => w.dates) : weekDates;
+      for (const day of dates) {
+        const shiftValue = newSchedule[techId]?.[day.date] || "off";
+        if (shiftValue !== "off") {
+          const dayInfo = getEffectiveDayInfo(
+            day,
+            shopSettings.operational_hours,
+            shopSettings.work_week,
+            holidays,
+            shopSettings.auto_schedule_rules.default_lunch_minutes
+          );
+          total += dayInfo.hours;
+        }
+      }
+      const newHours = { ...weeklyHours, [techId]: total };
+      const newPay = { ...weeklyPay, [techId]: calculatePay(total, technicians.find(t => t.id === techId)?.pay_rate || 0, technicians.find(t => t.id === techId)?.pay_type || "hourly") };
+      const newTotal = Object.values(newPay).reduce((sum, val) => sum + val, 0);
+      setWeeklyHours(newHours);
+      setWeeklyPay(newPay);
+      setTotalPay(newTotal);
+    }
   };
 
   const handleAutoSchedule = () => {
@@ -466,6 +564,9 @@ export const Schedule: React.FC = () => {
     );
     
     setSchedule(result.schedule);
+    setWeeklyHours(result.weeklyHours);
+    setWeeklyPay(result.weeklyPay);
+    setTotalPay(result.totalPay);
     setWarnings(result.warnings);
     setHolidayWarnings(result.holidayWarnings);
     
@@ -505,6 +606,36 @@ export const Schedule: React.FC = () => {
     }
   };
 
+  const handleSaveSettings = async () => {
+    if (!currentShopId || !shopSettings) return;
+    
+    const updatedAutoRules = {
+      ...shopSettings.auto_schedule_rules,
+      default_shift_hours: tempShiftHours,
+      default_lunch_minutes: tempLunchMinutes,
+    };
+    
+    setShopSettings({ ...shopSettings, auto_schedule_rules: updatedAutoRules });
+    
+    const { error } = await supabaseClient
+      .from("shop_settings")
+      .upsert({
+        shop_id: currentShopId,
+        auto_schedule_rules: updatedAutoRules,
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: 'shop_id',
+      });
+    
+    if (error) {
+      console.error("Error saving settings:", error);
+      message.error("Failed to save settings");
+    } else {
+      message.success("Shift settings saved");
+      setSettingsModalVisible(false);
+    }
+  };
+
   const handleNavigate = (direction: 'prev' | 'next') => {
     setCurrentOffset(prev => direction === 'prev' ? prev - 1 : prev + 1);
   };
@@ -519,19 +650,7 @@ export const Schedule: React.FC = () => {
   };
 
   const calculateTechTotalHours = (techId: string): number => {
-    if (!shopSettings) return 0;
-    let total = 0;
-    const dates = viewMode === "monthly" ? monthWeeks.flatMap(w => w.dates) : weekDates;
-    for (const day of dates) {
-      const shiftValue = schedule[techId]?.[day.date] || "off";
-      if (shiftValue !== "off") {
-        const { hours } = getEffectiveDayInfo(
-          day, shopSettings.operational_hours, shopSettings.work_week, holidays
-        );
-        total += hours;
-      }
-    }
-    return total;
+    return weeklyHours[techId] || 0;
   };
 
   const displayDates = viewMode === "monthly" ? monthWeeks.flatMap(w => w.dates) : weekDates;
@@ -540,7 +659,7 @@ export const Schedule: React.FC = () => {
     { title: "Tech", dataIndex: "name", key: "name", fixed: "left" as const, width: 120 },
     ...displayDates.map((day) => {
       const dayInfo = shopSettings ? getEffectiveDayInfo(
-        day, shopSettings.operational_hours, shopSettings.work_week, holidays
+        day, shopSettings.operational_hours, shopSettings.work_week, holidays, shopSettings.auto_schedule_rules.default_lunch_minutes
       ) : { isOpen: true, hours: 0, timeDisplay: "", openTime: null, closeTime: null, isReducedHoliday: false };
       
       return {
@@ -553,7 +672,7 @@ export const Schedule: React.FC = () => {
           </div>
         ),
         key: day.date,
-        width: 110,
+        width: 140,
         render: (_: any, record: any) => {
           const shiftValue = schedule[record.id]?.[day.date] || "off";
           const isOpen = dayInfo.isOpen;
@@ -561,9 +680,6 @@ export const Schedule: React.FC = () => {
           if (!isOpen) {
             return <Tag color="red" style={{ width: "100%", textAlign: "center" }}>CLOSED</Tag>;
           }
-          
-          // Show the actual time range if stored, otherwise show the day's hours
-          const displayValue = shiftValue !== "off" ? shiftValue : dayInfo.timeDisplay;
           
           return (
             <Select
@@ -573,16 +689,18 @@ export const Schedule: React.FC = () => {
               size="small"
             >
               <Option value="off">OFF</Option>
-              <Option value="work">{dayInfo.timeDisplay}</Option>
+              {shiftOptions.map(shift => (
+                <Option key={shift.value} value={shift.value}>{shift.label}</Option>
+              ))}
             </Select>
           );
         },
       };
     }),
     { 
-      title: "Hrs", 
+      title: "Hours", 
       key: "hours", 
-      width: 60, 
+      width: 70, 
       render: (_: any, record: any) => {
         const total = calculateTechTotalHours(record.id);
         const tech = technicians.find(t => t.id === record.id);
@@ -592,6 +710,15 @@ export const Schedule: React.FC = () => {
           if (tech.max_hours > 0 && total > tech.max_hours) color = "red";
         }
         return <Tag color={color}>{total.toFixed(1)}</Tag>;
+      }
+    },
+    { 
+      title: "Pay", 
+      key: "pay", 
+      width: 80, 
+      render: (_: any, record: any) => {
+        const pay = weeklyPay[record.id] || 0;
+        return <span style={{ color: "#E5E7EB" }}>${pay.toFixed(2)}</span>;
       }
     },
   ];
@@ -622,6 +749,9 @@ export const Schedule: React.FC = () => {
             {viewMode === "weekly" && <Button icon={<CopyOutlined />} onClick={() => setCopyModalVisible(true)} size="small">Copy Month</Button>}
           </Space>
           <Space>
+            <Button icon={<SettingOutlined />} onClick={() => setSettingsModalVisible(true)} size="small">
+              Shift Settings
+            </Button>
             <Switch checked={autoMode} onChange={setAutoMode} size="small" />
             <span style={{ color: "#E5E7EB", fontSize: "12px" }}>{autoMode ? "Auto" : "Manual"}</span>
             {autoMode && <Button icon={<ThunderboltOutlined />} onClick={handleAutoSchedule} style={{ backgroundColor: "#2E7D32", color: "#FFF" }} size="small">Generate</Button>}
@@ -629,7 +759,44 @@ export const Schedule: React.FC = () => {
           </Space>
         </div>
         
-        {/* Warnings Banner */}
+        {/* Payroll Summary Row */}
+        <Row gutter={16} style={{ marginBottom: "16px" }}>
+          <Col span={8}>
+            <Card size="small" style={{ background: "rgba(0,0,0,0.5)", borderColor: "rgba(255,255,255,0.1)" }}>
+              <Statistic
+                title="Total Weekly Payroll"
+                value={totalPay}
+                precision={2}
+                prefix={<DollarOutlined />}
+                valueStyle={{ color: "#4CAF50" }}
+              />
+            </Card>
+          </Col>
+          <Col span={8}>
+            <Card size="small" style={{ background: "rgba(0,0,0,0.5)", borderColor: "rgba(255,255,255,0.1)" }}>
+              <Statistic
+                title="Total Tech Hours"
+                value={Object.values(weeklyHours).reduce((a, b) => a + b, 0)}
+                precision={1}
+                prefix={<ClockCircleOutlined />}
+                valueStyle={{ color: "#1890FF" }}
+              />
+            </Card>
+          </Col>
+          <Col span={8}>
+            <Card size="small" style={{ background: "rgba(0,0,0,0.5)", borderColor: "rgba(255,255,255,0.1)" }}>
+              <Statistic
+                title="Avg Hourly Rate"
+                value={totalPay > 0 ? totalPay / (Object.values(weeklyHours).reduce((a, b) => a + b, 0) || 1) : 0}
+                precision={2}
+                prefix={<DollarOutlined />}
+                valueStyle={{ color: "#E5E7EB" }}
+              />
+            </Card>
+          </Col>
+        </Row>
+        
+        {/* Holiday Warnings Banner */}
         {holidayWarnings.length > 0 && (
           <Alert
             message="Reduced Holiday Hours"
@@ -647,6 +814,7 @@ export const Schedule: React.FC = () => {
           />
         )}
         
+        {/* Warnings Banner */}
         {warnings.length > 0 && (
           <Alert
             message="Scheduling Warnings"
@@ -664,7 +832,7 @@ export const Schedule: React.FC = () => {
           />
         )}
         
-        <Table columns={columns} dataSource={dataSource} loading={loading} pagination={false} size="small" scroll={{ x: displayDates.length * 110 }} />
+        <Table columns={columns} dataSource={dataSource} loading={loading} pagination={false} size="small" scroll={{ x: displayDates.length * 140 }} />
       </Card>
       
       <Modal title="Copy to Month" open={copyModalVisible} onOk={() => setCopyModalVisible(false)} onCancel={() => setCopyModalVisible(false)} footer={null}>
@@ -672,6 +840,54 @@ export const Schedule: React.FC = () => {
           {monthWeeks.map((week, idx) => (<Checkbox key={idx} value={idx + 1}>Week {week.weekNumber} ({week.dates[0]?.display} - {week.dates[week.dates.length-1]?.display})</Checkbox>))}
         </Checkbox.Group>
         <Button type="primary" style={{ marginTop: 16, backgroundColor: "#2E7D32" }} onClick={() => setCopyModalVisible(false)}>Copy</Button>
+      </Modal>
+      
+      <Modal
+        title="Shift Settings"
+        open={settingsModalVisible}
+        onOk={handleSaveSettings}
+        onCancel={() => setSettingsModalVisible(false)}
+        okText="Save"
+        cancelText="Cancel"
+      >
+        <div style={{ marginBottom: "16px" }}>
+          <div style={{ marginBottom: "8px" }}>
+            <Text style={{ color: "#E5E7EB" }}>Default Shift Length (hours)</Text>
+            <Tooltip title="Total shift hours before lunch deduction">
+              <QuestionCircleOutlined style={{ color: "#9CA3AF", marginLeft: "8px" }} />
+            </Tooltip>
+          </div>
+          <InputNumber
+            value={tempShiftHours}
+            onChange={(val) => setTempShiftHours(val || 8)}
+            min={1}
+            max={12}
+            step={0.5}
+            style={{ width: "100%" }}
+            addonAfter="hours"
+          />
+        </div>
+        <div style={{ marginBottom: "16px" }}>
+          <div style={{ marginBottom: "8px" }}>
+            <Text style={{ color: "#E5E7EB" }}>Default Lunch Break (minutes)</Text>
+            <Tooltip title="Unpaid lunch break deducted from shift">
+              <QuestionCircleOutlined style={{ color: "#9CA3AF", marginLeft: "8px" }} />
+            </Tooltip>
+          </div>
+          <InputNumber
+            value={tempLunchMinutes}
+            onChange={(val) => setTempLunchMinutes(val || 30)}
+            min={0}
+            max={120}
+            step={15}
+            style={{ width: "100%" }}
+            addonAfter="minutes"
+          />
+        </div>
+        <Divider />
+        <Text type="secondary" style={{ fontSize: "12px" }}>
+          Example: {tempShiftHours} hour shift - {tempLunchMinutes} min lunch = {(tempShiftHours - (tempLunchMinutes / 60)).toFixed(1)} paid hours per shift
+        </Text>
       </Modal>
     </div>
   );

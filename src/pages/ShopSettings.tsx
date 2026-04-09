@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Card, Switch, TimePicker, Button, Space, message, Tabs, Table, Popconfirm, Input, Row, Col, Typography, InputNumber, Collapse, Alert, Divider, Select, Tooltip, Modal, Form, Tag } from "antd";
-import { PlusOutlined, DeleteOutlined, SaveOutlined, CopyOutlined, QuestionCircleOutlined } from "@ant-design/icons";
+import { PlusOutlined, DeleteOutlined, SaveOutlined, CopyOutlined, QuestionCircleOutlined, SettingOutlined } from "@ant-design/icons";
 import { supabaseClient } from "../utils";
 import dayjs, { Dayjs } from "dayjs";
 
@@ -110,6 +110,8 @@ export const ShopSettings: React.FC = () => {
     respect_hours_limits: true,
     manual_override_enabled: false,
     manual_override_weeks: 0,
+    default_shift_hours: 8,
+    default_lunch_minutes: 30,
   });
   
   const [enableAdvancedOverrides, setEnableAdvancedOverrides] = useState(false);
@@ -163,7 +165,12 @@ export const ShopSettings: React.FC = () => {
       }
       
       setHolidays(data.holidays || []);
-      setAutoRules(data.auto_schedule_rules || autoRules);
+      setAutoRules({
+        ...autoRules,
+        ...data.auto_schedule_rules,
+        default_shift_hours: data.auto_schedule_rules?.default_shift_hours || 8,
+        default_lunch_minutes: data.auto_schedule_rules?.default_lunch_minutes || 30,
+      });
       
       if (data.advanced_settings) {
         setEnableAdvancedOverrides(data.advanced_settings.enable || false);
@@ -704,6 +711,55 @@ export const ShopSettings: React.FC = () => {
 
           <TabPane tab="Auto Schedule Rules" key="rules">
             <div style={{ maxWidth: "500px" }}>
+              <div
+                style={{
+                  marginBottom: "16px",
+                  padding: "16px",
+                  background: "rgba(255,255,255,0.05)",
+                  borderRadius: "8px",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                  <Text style={{ color: "#E5E7EB" }}>Default Shift Hours</Text>
+                  <Tooltip title="Total shift hours before lunch deduction">
+                    <QuestionCircleOutlined style={{ color: "#9CA3AF" }} />
+                  </Tooltip>
+                </div>
+                <InputNumber
+                  value={autoRules.default_shift_hours}
+                  onChange={(val) => setAutoRules({ ...autoRules, default_shift_hours: val || 8 })}
+                  min={1}
+                  max={12}
+                  step={0.5}
+                  style={{ width: "100px" }}
+                  addonAfter="hours"
+                />
+              </div>
+              <div
+                style={{
+                  marginBottom: "16px",
+                  padding: "16px",
+                  background: "rgba(255,255,255,0.05)",
+                  borderRadius: "8px",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                  <Text style={{ color: "#E5E7EB" }}>Default Lunch Break (minutes)</Text>
+                  <Tooltip title="Unpaid lunch break deducted from shift">
+                    <QuestionCircleOutlined style={{ color: "#9CA3AF" }} />
+                  </Tooltip>
+                </div>
+                <InputNumber
+                  value={autoRules.default_lunch_minutes}
+                  onChange={(val) => setAutoRules({ ...autoRules, default_lunch_minutes: val || 30 })}
+                  min={0}
+                  max={120}
+                  step={15}
+                  style={{ width: "100px" }}
+                  addonAfter="minutes"
+                />
+              </div>
+              <Divider style={{ borderColor: "rgba(255,255,255,0.1)" }} />
               <div
                 style={{
                   marginBottom: "16px",
