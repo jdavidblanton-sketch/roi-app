@@ -242,7 +242,8 @@ const generateSimpleSchedule = (
     const toAssign = Math.min(minTechs, availableTechs.length);
     for (let i = 0; i < toAssign; i++) {
       const tech = availableTechs[i];
-      schedule[tech.id][day.date] = "work";
+      // Store the actual time display (e.g., "07:30-16:00") instead of "work"
+      schedule[tech.id][day.date] = timeDisplay;
       weeklyHours[tech.id] += hours;
     }
   }
@@ -253,7 +254,7 @@ const generateSimpleSchedule = (
       if (tech.min_hours > 0 && weeklyHours[tech.id] < tech.min_hours) {
         let neededHours = tech.min_hours - weeklyHours[tech.id];
         
-        for (const { day, hours, isOpen } of dailyInfo) {
+        for (const { day, hours, isOpen, timeDisplay } of dailyInfo) {
           if (neededHours <= 0) break;
           if (!isOpen) continue;
           if (schedule[tech.id][day.date] !== "off") continue;
@@ -265,7 +266,7 @@ const generateSimpleSchedule = (
             continue;
           }
           
-          schedule[tech.id][day.date] = "work";
+          schedule[tech.id][day.date] = timeDisplay;
           weeklyHours[tech.id] += hours;
           neededHours -= hours;
         }
@@ -604,7 +605,7 @@ export const Schedule: React.FC = () => {
           </div>
         ),
         key: day.date,
-        width: 100,
+        width: 110,
         render: (_: any, record: any) => {
           const currentShiftValue = schedule[record.id]?.[day.date] || "off";
           const isOpen = dayInfo.isOpen;
@@ -621,7 +622,7 @@ export const Schedule: React.FC = () => {
               size="small"
             >
               <Option value="off">OFF</Option>
-              <Option value="work">WORK</Option>
+              <Option value={dayInfo.timeDisplay}>{dayInfo.timeDisplay}</Option>
             </Select>
           );
         },
@@ -658,6 +659,74 @@ export const Schedule: React.FC = () => {
     id: tech.id,
     name: `${tech.first_name} ${tech.last_name}`,
   }));
+
+  const monthlyDataSource = technicians.map((tech) => {
+    const days = monthDays.map(day => {
+      const shiftValue = schedule[tech.id]?.[day.date] || "off";
+      const dayInfo = getDayDisplayInfo(day);
+      
+      let displayText = "OFF";
+      let isClosed = false;
+      
+      if (!dayInfo.isOpen) {
+        displayText = "CLOSED";
+        isClosed = true;
+      } else if (shiftValue !== "off") {
+        displayText = shiftValue;
+      }
+      
+      return {
+        date: day.date,
+        dayOfMonth: day.dayOfMonth,
+        display: displayText,
+        isClosed,
+      };
+    });
+    return {
+      key: tech.id,
+      id: tech.id,
+      name: `${tech.first_name} ${tech.last_name}`,
+      days: days,
+      tech: tech,
+    };
+  });
+
+  const monthlyColumns = [
+    { title: "Tech", dataIndex: "name", key: "name", fixed: "left" as const, width: 120 },
+    ...monthDays.map((day) => {
+      const dayInfo = getDayDisplayInfo(day);
+      return {
+        title: (
+          <div>
+            <div>{day.display}</div>
+            <div style={{ fontSize: "10px" }}>{dayInfo.timeDisplay}</div>
+          </div>
+        ),
+        key: day.date,
+        width: 90,
+        render: (_: any, record: any) => {
+          const dayData = record.days.find((d: any) => d.date === day.date);
+          if (dayData?.isClosed) {
+            return <Tag color="red" style={{ width: "100%", textAlign: "center" }}>CLOSED</Tag>;
+          }
+          return (
+            <Tag color={dayData?.display !== "OFF" ? "blue" : "default"} style={{ width: "100%", textAlign: "center" }}>
+              {dayData?.display || "OFF"}
+            </Tag>
+          );
+        },
+      };
+    }),
+    { 
+      title: "Hours", 
+      key: "hours", 
+      width: 70, 
+      render: (_: any, record: any) => {
+        const total = weeklyHours[record.id] || 0;
+        return <Tag color="blue">{total.toFixed(1)}</Tag>;
+      }
+    },
+  ];
 
   return (
     <div style={{ padding: "24px" }}>
@@ -747,7 +816,11 @@ export const Schedule: React.FC = () => {
           />
         )}
         
-        <Table columns={weeklyColumns} dataSource={weeklyDataSource} loading={loading} pagination={false} size="small" scroll={{ x: weekDates.length * 100 }} />
+        {viewMode === "monthly" ? (
+          <Table columns={monthlyColumns} dataSource={monthlyDataSource} loading={loading} pagination={false} size="small" scroll={{ x: monthDays.length * 90 }} />
+        ) : (
+          <Table columns={weeklyColumns} dataSource={weeklyDataSource} loading={loading} pagination={false} size="small" scroll={{ x: weekDates.length * 110 }} />
+        )}
       </Card>
       
       <Modal title="Copy to Month" open={copyModalVisible} onOk={() => setCopyModalVisible(false)} onCancel={() => setCopyModalVisible(false)} footer={null}>
