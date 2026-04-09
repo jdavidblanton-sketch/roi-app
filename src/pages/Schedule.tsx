@@ -194,8 +194,11 @@ const generateSimpleSchedule = (
   const openDaysCount = Object.values(workWeek).filter(v => v === true).length;
   const respectDayOff = autoRules.respect_day_off && openDaysCount > 5;
   
+  // Keep track of which techs were assigned on previous days to rotate
+  let lastAssignedIndex = 0;
+  
   // For each day, assign techs to meet min requirement
-  for (const { day, hours, isOpen, timeDisplay } of dailyInfo) {
+  for (const { day, hours, isOpen } of dailyInfo) {
     if (!isOpen || hours === 0) {
       continue;
     }
@@ -203,7 +206,7 @@ const generateSimpleSchedule = (
     let minTechs = autoRules.min_techs_per_shift;
     let maxTechs = autoRules.max_techs_per_shift;
     
-    // Get available techs
+    // Get available techs (not at max hours, not on day off)
     let availableTechs = [...technicians];
     
     if (respectDayOff) {
@@ -223,29 +226,36 @@ const generateSimpleSchedule = (
     
     if (availableTechs.length < minTechs) {
       warnings.push(`${day.name}: Need ${minTechs} techs but only ${availableTechs.length} available.`);
-      // Override day off to meet minimum
+      // Override max hours to meet minimum
       availableTechs = [...technicians];
-      if (autoRules.respect_hours_limits) {
-        availableTechs = availableTechs.filter(tech => {
-          if (tech.max_hours > 0 && weeklyHours[tech.id] + hours > tech.max_hours) {
-            return false;
-          }
-          return true;
-        });
+      if (respectDayOff) {
+        availableTechs = availableTechs.filter(tech => 
+          tech.primary_day_off !== day.name && tech.secondary_day_off !== day.name
+        );
       }
     }
     
-    // Sort by current hours (lowest first)
+    // Sort by current hours (lowest first) for fair distribution
     availableTechs.sort((a, b) => weeklyHours[a.id] - weeklyHours[b.id]);
     
-    // Assign exactly minTechs techs
+    // Rotate starting point to ensure different techs get scheduled each day
     const toAssign = Math.min(minTechs, availableTechs.length);
+    const rotatedTechs = [...availableTechs];
+    
+    // Rotate the array based on last assigned index
+    for (let i = 0; i < lastAssignedIndex % availableTechs.length; i++) {
+      rotatedTechs.push(rotatedTechs.shift()!);
+    }
+    
+    // Assign to the first 'toAssign' techs in the rotated array
     for (let i = 0; i < toAssign; i++) {
-      const tech = availableTechs[i];
-      // Store the actual time display (e.g., "07:30-16:00") instead of "work"
-      schedule[tech.id][day.date] = timeDisplay;
+      const tech = rotatedTechs[i];
+      schedule[tech.id][day.date] = "work";
       weeklyHours[tech.id] += hours;
     }
+    
+    // Update last assigned index for next day's rotation
+    lastAssignedIndex += toAssign;
   }
   
   // Enforce min hours (add shifts if needed)
@@ -254,7 +264,7 @@ const generateSimpleSchedule = (
       if (tech.min_hours > 0 && weeklyHours[tech.id] < tech.min_hours) {
         let neededHours = tech.min_hours - weeklyHours[tech.id];
         
-        for (const { day, hours, isOpen, timeDisplay } of dailyInfo) {
+        for (const { day, hours, isOpen } of dailyInfo) {
           if (neededHours <= 0) break;
           if (!isOpen) continue;
           if (schedule[tech.id][day.date] !== "off") continue;
@@ -266,7 +276,7 @@ const generateSimpleSchedule = (
             continue;
           }
           
-          schedule[tech.id][day.date] = timeDisplay;
+          schedule[tech.id][day.date] = "work";
           weeklyHours[tech.id] += hours;
           neededHours -= hours;
         }
@@ -605,7 +615,7 @@ export const Schedule: React.FC = () => {
           </div>
         ),
         key: day.date,
-        width: 110,
+        width: 100,
         render: (_: any, record: any) => {
           const currentShiftValue = schedule[record.id]?.[day.date] || "off";
           const isOpen = dayInfo.isOpen;
@@ -622,7 +632,7 @@ export const Schedule: React.FC = () => {
               size="small"
             >
               <Option value="off">OFF</Option>
-              <Option value={dayInfo.timeDisplay}>{dayInfo.timeDisplay}</Option>
+              <Option value="work">WORK</Option>
             </Select>
           );
         },
@@ -659,74 +669,6 @@ export const Schedule: React.FC = () => {
     id: tech.id,
     name: `${tech.first_name} ${tech.last_name}`,
   }));
-
-  const monthlyDataSource = technicians.map((tech) => {
-    const days = monthDays.map(day => {
-      const shiftValue = schedule[tech.id]?.[day.date] || "off";
-      const dayInfo = getDayDisplayInfo(day);
-      
-      let displayText = "OFF";
-      let isClosed = false;
-      
-      if (!dayInfo.isOpen) {
-        displayText = "CLOSED";
-        isClosed = true;
-      } else if (shiftValue !== "off") {
-        displayText = shiftValue;
-      }
-      
-      return {
-        date: day.date,
-        dayOfMonth: day.dayOfMonth,
-        display: displayText,
-        isClosed,
-      };
-    });
-    return {
-      key: tech.id,
-      id: tech.id,
-      name: `${tech.first_name} ${tech.last_name}`,
-      days: days,
-      tech: tech,
-    };
-  });
-
-  const monthlyColumns = [
-    { title: "Tech", dataIndex: "name", key: "name", fixed: "left" as const, width: 120 },
-    ...monthDays.map((day) => {
-      const dayInfo = getDayDisplayInfo(day);
-      return {
-        title: (
-          <div>
-            <div>{day.display}</div>
-            <div style={{ fontSize: "10px" }}>{dayInfo.timeDisplay}</div>
-          </div>
-        ),
-        key: day.date,
-        width: 90,
-        render: (_: any, record: any) => {
-          const dayData = record.days.find((d: any) => d.date === day.date);
-          if (dayData?.isClosed) {
-            return <Tag color="red" style={{ width: "100%", textAlign: "center" }}>CLOSED</Tag>;
-          }
-          return (
-            <Tag color={dayData?.display !== "OFF" ? "blue" : "default"} style={{ width: "100%", textAlign: "center" }}>
-              {dayData?.display || "OFF"}
-            </Tag>
-          );
-        },
-      };
-    }),
-    { 
-      title: "Hours", 
-      key: "hours", 
-      width: 70, 
-      render: (_: any, record: any) => {
-        const total = weeklyHours[record.id] || 0;
-        return <Tag color="blue">{total.toFixed(1)}</Tag>;
-      }
-    },
-  ];
 
   return (
     <div style={{ padding: "24px" }}>
@@ -816,11 +758,7 @@ export const Schedule: React.FC = () => {
           />
         )}
         
-        {viewMode === "monthly" ? (
-          <Table columns={monthlyColumns} dataSource={monthlyDataSource} loading={loading} pagination={false} size="small" scroll={{ x: monthDays.length * 90 }} />
-        ) : (
-          <Table columns={weeklyColumns} dataSource={weeklyDataSource} loading={loading} pagination={false} size="small" scroll={{ x: weekDates.length * 110 }} />
-        )}
+        <Table columns={weeklyColumns} dataSource={weeklyDataSource} loading={loading} pagination={false} size="small" scroll={{ x: weekDates.length * 100 }} />
       </Card>
       
       <Modal title="Copy to Month" open={copyModalVisible} onOk={() => setCopyModalVisible(false)} onCancel={() => setCopyModalVisible(false)} footer={null}>
