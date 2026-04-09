@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { Table, Button, Select, Card, message, Switch, Space, Radio, Modal, Checkbox, Tag, Tooltip, Alert, InputNumber, Divider, Statistic, Row, Col, Calendar, Badge, List } from "antd";
+import { Table, Button, Select, Card, message, Switch, Space, Radio, Modal, Checkbox, Tag, Tooltip, Alert, InputNumber, Divider, Statistic, Row, Col } from "antd";
 import { SaveOutlined, ThunderboltOutlined, LeftOutlined, RightOutlined, CopyOutlined, WarningOutlined, DollarOutlined, ClockCircleOutlined, SettingOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import { supabaseClient } from "../utils";
 import { Typography } from "antd";
-import dayjs from "dayjs";
 
 const { Option } = Select;
 const { Text } = Typography;
@@ -110,24 +109,20 @@ const getMonthDays = (offset: number = 0) => {
   return days;
 };
 
-const getDayHours = (openTime: string | null, closeTime: string | null, lunchMinutes: number, defaultShiftHours: number): number => {
-  if (!openTime || !closeTime) return 0;
-  
-  // Use the configured shift hours if available, otherwise calculate from open/close
-  if (defaultShiftHours > 0) {
-    return defaultShiftHours - (lunchMinutes / 60);
-  }
-  
-  const openHour = parseFloat(openTime.split(":")[0]) + parseFloat(openTime.split(":")[1]) / 60;
-  const closeHour = parseFloat(closeTime.split(":")[0]) + parseFloat(closeTime.split(":")[1]) / 60;
-  const totalHours = closeHour - openHour;
-  const lunchHours = lunchMinutes / 60;
-  return Math.max(0, totalHours - lunchHours);
+// CRITICAL FIX: Use configured shift hours, NOT open/close times
+const getPaidHoursPerShift = (defaultShiftHours: number, lunchMinutes: number): number => {
+  return defaultShiftHours - (lunchMinutes / 60);
 };
 
-const getTimeDisplay = (openTime: string | null, closeTime: string | null): string => {
-  if (!openTime || !closeTime) return "Closed";
-  return `${openTime} - ${closeTime}`;
+// Get display time for a shift (just the shift name or configured time)
+const getShiftDisplay = (shiftTemplateId: string | null, shiftTemplates: ShiftTemplate[]): string => {
+  if (!shiftTemplateId) return "WORK";
+  const template = shiftTemplates.find(t => t.id === shiftTemplateId);
+  if (template) {
+    // Show just the shift name, not the times
+    return template.name;
+  }
+  return "WORK";
 };
 
 const isHoliday = (date: string, holidays: Holiday[]): Holiday | undefined => {
@@ -139,33 +134,28 @@ const getEffectiveDayInfo = (
   operationalHours: OperationalHours,
   workWeek: WorkWeek,
   holidays: Holiday[],
-  lunchMinutes: number,
-  defaultShiftHours: number,
   shiftTemplates: ShiftTemplate[],
   dailyShiftSettings: any[]
-): { isOpen: boolean; hours: number; timeDisplay: string; openTime: string | null; closeTime: string | null; isReducedHoliday: boolean; holidayName?: string; shiftTemplateId?: string | null } => {
+): { isOpen: boolean; shiftDisplay: string; shiftTemplateId: string | null; isReducedHoliday: boolean; holidayName?: string } => {
   const dayKey = day.dayKey as keyof WorkWeek;
   
   if (!workWeek[dayKey]) {
-    return { isOpen: false, hours: 0, timeDisplay: "Shop Closed", openTime: null, closeTime: null, isReducedHoliday: false, shiftTemplateId: null };
+    return { isOpen: false, shiftDisplay: "Closed", shiftTemplateId: null, isReducedHoliday: false };
   }
   
   const holiday = isHoliday(day.date, holidays);
   if (holiday) {
     if (holiday.is_closed) {
-      return { isOpen: false, hours: 0, timeDisplay: "Holiday - Closed", openTime: null, closeTime: null, isReducedHoliday: false, holidayName: holiday.name, shiftTemplateId: null };
+      return { isOpen: false, shiftDisplay: "Holiday", shiftTemplateId: null, isReducedHoliday: false, holidayName: holiday.name };
     }
     if (holiday.open_time && holiday.close_time) {
-      const hours = getDayHours(holiday.open_time, holiday.close_time, lunchMinutes, defaultShiftHours);
+      // Holiday with reduced hours - still open
       return { 
         isOpen: true, 
-        hours: hours, 
-        timeDisplay: `${holiday.open_time} - ${holiday.close_time}`,
-        openTime: holiday.open_time,
-        closeTime: holiday.close_time,
+        shiftDisplay: "Holiday Hours",
+        shiftTemplateId: null,
         isReducedHoliday: true,
-        holidayName: holiday.name,
-        shiftTemplateId: null
+        holidayName: holiday.name
       };
     }
   }
@@ -175,33 +165,21 @@ const getEffectiveDayInfo = (
   if (dailySetting?.template_id) {
     const template = shiftTemplates.find(t => t.id === dailySetting.template_id);
     if (template) {
-      const hours = getDayHours(template.start_time, template.end_time, lunchMinutes, defaultShiftHours);
       return {
         isOpen: true,
-        hours: hours,
-        timeDisplay: `${template.start_time} - ${template.end_time}`,
-        openTime: template.start_time,
-        closeTime: template.end_time,
-        isReducedHoliday: false,
-        shiftTemplateId: template.id
+        shiftDisplay: template.name,
+        shiftTemplateId: template.id,
+        isReducedHoliday: false
       };
     }
   }
   
-  const dayHours = operationalHours[day.dayKey as keyof OperationalHours];
-  if (!dayHours?.open || !dayHours?.close) {
-    return { isOpen: false, hours: 0, timeDisplay: "No hours set", openTime: null, closeTime: null, isReducedHoliday: false, shiftTemplateId: null };
-  }
-  
-  const hours = getDayHours(dayHours.open, dayHours.close, lunchMinutes, defaultShiftHours);
+  // Default - shop is open with default shift
   return { 
     isOpen: true, 
-    hours: hours, 
-    timeDisplay: getTimeDisplay(dayHours.open, dayHours.close),
-    openTime: dayHours.open,
-    closeTime: dayHours.close,
-    isReducedHoliday: false,
-    shiftTemplateId: null
+    shiftDisplay: "WORK",
+    shiftTemplateId: null,
+    isReducedHoliday: false
   };
 };
 
@@ -247,7 +225,6 @@ const calculatePay = (hours: number, payRate: number, payType: string): number =
 const generateSchedule = (
   technicians: Technician[],
   dates: any[],
-  operationalHours: OperationalHours,
   workWeek: WorkWeek,
   holidays: Holiday[],
   shiftTemplates: ShiftTemplate[],
@@ -258,6 +235,7 @@ const generateSchedule = (
   const schedule: Record<string, Record<string, string>> = {};
   const warnings: string[] = [];
   const holidayWarnings: string[] = [];
+  const paidHoursPerShift = getPaidHoursPerShift(autoRules.default_shift_hours, autoRules.default_lunch_minutes);
   
   for (const tech of technicians) {
     schedule[tech.id] = {};
@@ -275,8 +253,8 @@ const generateSchedule = (
   const respectDayOff = autoRules.respect_day_off && openDaysCount > 5;
   
   for (const day of dates) {
-    const { isOpen, hours, openTime, closeTime, isReducedHoliday, holidayName } = getEffectiveDayInfo(
-      day, operationalHours, workWeek, holidays, autoRules.default_lunch_minutes, autoRules.default_shift_hours, shiftTemplates, dailyShiftSettings
+    const { isOpen, shiftDisplay, shiftTemplateId, isReducedHoliday, holidayName } = getEffectiveDayInfo(
+      day, {} as OperationalHours, workWeek, holidays, shiftTemplates, dailyShiftSettings
     );
     
     if (!isOpen) {
@@ -284,7 +262,7 @@ const generateSchedule = (
     }
     
     if (isReducedHoliday) {
-      holidayWarnings.push(`${day.name} (${day.date}) - ${holidayName} has reduced hours: ${openTime}-${closeTime}. Please review and adjust schedule manually if needed.`);
+      holidayWarnings.push(`${day.name} (${day.date}) - ${holidayName} has reduced hours. Please review and adjust schedule manually if needed.`);
     }
     
     let minTechs = getEffectiveMinTechs(day.dayKey, autoRules.min_techs_per_shift, advancedSettings);
@@ -300,7 +278,7 @@ const generateSchedule = (
     
     if (autoRules.respect_hours_limits) {
       availableTechs = availableTechs.filter(tech => {
-        if (tech.max_hours > 0 && weeklyHours[tech.id] + hours > tech.max_hours) {
+        if (tech.max_hours > 0 && weeklyHours[tech.id] + paidHoursPerShift > tech.max_hours) {
           return false;
         }
         return true;
@@ -312,7 +290,7 @@ const generateSchedule = (
       availableTechs = [...technicians];
       if (autoRules.respect_hours_limits) {
         availableTechs = availableTechs.filter(tech => {
-          if (tech.max_hours > 0 && weeklyHours[tech.id] + hours > tech.max_hours) {
+          if (tech.max_hours > 0 && weeklyHours[tech.id] + paidHoursPerShift > tech.max_hours) {
             return false;
           }
           return true;
@@ -325,10 +303,9 @@ const generateSchedule = (
     const toAssign = Math.min(maxTechs, availableTechs.length);
     for (let i = 0; i < toAssign; i++) {
       const tech = availableTechs[i];
-      // Store the actual time range for display
-      const timeDisplay = openTime && closeTime ? `${openTime}-${closeTime}` : "work";
-      schedule[tech.id][day.date] = timeDisplay;
-      weeklyHours[tech.id] += hours;
+      // Store the shift display name (e.g., "Morning", "Mid", "Late")
+      schedule[tech.id][day.date] = shiftDisplay;
+      weeklyHours[tech.id] += paidHoursPerShift;
     }
   }
   
@@ -336,12 +313,13 @@ const generateSchedule = (
     for (const tech of technicians) {
       if (tech.min_hours > 0 && weeklyHours[tech.id] < tech.min_hours) {
         let neededHours = tech.min_hours - weeklyHours[tech.id];
+        const shiftsNeeded = Math.ceil(neededHours / paidHoursPerShift);
         
         for (const day of dates) {
-          if (neededHours <= 0) break;
+          if (shiftsNeeded <= 0) break;
           
-          const { isOpen, hours, openTime, closeTime } = getEffectiveDayInfo(
-            day, operationalHours, workWeek, holidays, autoRules.default_lunch_minutes, autoRules.default_shift_hours, shiftTemplates, dailyShiftSettings
+          const { isOpen, shiftDisplay } = getEffectiveDayInfo(
+            day, {} as OperationalHours, workWeek, holidays, shiftTemplates, dailyShiftSettings
           );
           
           if (!isOpen) continue;
@@ -350,14 +328,12 @@ const generateSchedule = (
           const isDayOff = respectDayOff && (tech.primary_day_off === day.name || tech.secondary_day_off === day.name);
           if (isDayOff) continue;
           
-          if (tech.max_hours > 0 && weeklyHours[tech.id] + hours > tech.max_hours) {
+          if (tech.max_hours > 0 && weeklyHours[tech.id] + paidHoursPerShift > tech.max_hours) {
             continue;
           }
           
-          const timeDisplay = openTime && closeTime ? `${openTime}-${closeTime}` : "work";
-          schedule[tech.id][day.date] = timeDisplay;
-          weeklyHours[tech.id] += hours;
-          neededHours -= hours;
+          schedule[tech.id][day.date] = shiftDisplay;
+          weeklyHours[tech.id] += paidHoursPerShift;
         }
       }
     }
@@ -380,7 +356,6 @@ export const Schedule: React.FC = () => {
   const [dailyShiftSettings, setDailyShiftSettings] = useState<any[]>([]);
   const [shopSettings, setShopSettings] = useState<{ 
     work_week: WorkWeek; 
-    operational_hours: OperationalHours; 
     auto_schedule_rules: AutoRules; 
     advanced_settings: AdvancedSettings | null 
   } | null>(null);
@@ -403,7 +378,6 @@ export const Schedule: React.FC = () => {
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
   const [tempShiftHours, setTempShiftHours] = useState<number>(8.5);
   const [tempLunchMinutes, setTempLunchMinutes] = useState<number>(30);
-  const [selectedTechForRotation, setSelectedTechForRotation] = useState<string | null>(null);
   const [rotationModalVisible, setRotationModalVisible] = useState(false);
 
   useEffect(() => {
@@ -447,7 +421,6 @@ export const Schedule: React.FC = () => {
       if (settingsData) {
         settings = {
           work_week: settingsData.work_week,
-          operational_hours: settingsData.operational_hours,
           auto_schedule_rules: settingsData.auto_schedule_rules || { 
             min_techs_per_shift: 1, 
             max_techs_per_shift: 3, 
@@ -470,15 +443,6 @@ export const Schedule: React.FC = () => {
       } else {
         settings = {
           work_week: { monday: true, tuesday: true, wednesday: true, thursday: true, friday: true, saturday: false, sunday: false },
-          operational_hours: {
-            monday: { open: "07:30", close: "16:00" },
-            tuesday: { open: "07:30", close: "16:00" },
-            wednesday: { open: "07:30", close: "16:00" },
-            thursday: { open: "07:30", close: "16:00" },
-            friday: { open: "07:30", close: "16:00" },
-            saturday: { open: "08:00", close: "16:00" },
-            sunday: { open: null, close: null },
-          },
           auto_schedule_rules: { 
             min_techs_per_shift: 1, 
             max_techs_per_shift: 3, 
@@ -527,6 +491,7 @@ export const Schedule: React.FC = () => {
     setSchedule(scheduleMap);
     
     if (shopSettings) {
+      const paidHoursPerShift = getPaidHoursPerShift(shopSettings.auto_schedule_rules.default_shift_hours, shopSettings.auto_schedule_rules.default_lunch_minutes);
       let tempHours: Record<string, number> = {};
       let tempPay: Record<string, number> = {};
       let tempTotal = 0;
@@ -535,17 +500,7 @@ export const Schedule: React.FC = () => {
         for (const day of weekDates) {
           const shiftValue = scheduleMap[tech.id]?.[day.date] || "off";
           if (shiftValue !== "off") {
-            const dayInfo = getEffectiveDayInfo(
-              day,
-              shopSettings.operational_hours,
-              shopSettings.work_week,
-              holidays,
-              shopSettings.auto_schedule_rules.default_lunch_minutes,
-              shopSettings.auto_schedule_rules.default_shift_hours,
-              shiftTemplates,
-              dailyShiftSettings
-            );
-            total += dayInfo.hours;
+            total += paidHoursPerShift;
           }
         }
         tempHours[tech.id] = total;
@@ -563,22 +518,13 @@ export const Schedule: React.FC = () => {
     setSchedule(newSchedule);
     
     if (shopSettings) {
+      const paidHoursPerShift = getPaidHoursPerShift(shopSettings.auto_schedule_rules.default_shift_hours, shopSettings.auto_schedule_rules.default_lunch_minutes);
       let total = 0;
       const dates = viewMode === "monthly" ? monthDays : weekDates;
       for (const day of dates) {
         const shiftVal = newSchedule[techId]?.[day.date] || "off";
         if (shiftVal !== "off") {
-          const dayInfo = getEffectiveDayInfo(
-            day,
-            shopSettings.operational_hours,
-            shopSettings.work_week,
-            holidays,
-            shopSettings.auto_schedule_rules.default_lunch_minutes,
-            shopSettings.auto_schedule_rules.default_shift_hours,
-            shiftTemplates,
-            dailyShiftSettings
-          );
-          total += dayInfo.hours;
+          total += paidHoursPerShift;
         }
       }
       const newHours = { ...weeklyHours, [techId]: total };
@@ -597,7 +543,6 @@ export const Schedule: React.FC = () => {
     }
     
     let dates = viewMode === "monthly" ? monthDays : weekDates;
-    const operationalHours = shopSettings.operational_hours;
     const workWeek = shopSettings.work_week;
     const autoRules = shopSettings.auto_schedule_rules;
     const advancedSettings = shopSettings.advanced_settings;
@@ -613,7 +558,7 @@ export const Schedule: React.FC = () => {
     }
     
     const result = generateSchedule(
-      techsToSchedule, dates, operationalHours, workWeek, holidays, shiftTemplates, dailyShiftSettings, autoRules, advancedSettings
+      techsToSchedule, dates, workWeek, holidays, shiftTemplates, dailyShiftSettings, autoRules, advancedSettings
     );
     
     setSchedule(result.schedule);
@@ -677,8 +622,6 @@ export const Schedule: React.FC = () => {
       ));
       message.success(`Technician ${includeInRotation ? "included in" : "excluded from"} rotation`);
     }
-    setRotationModalVisible(false);
-    setSelectedTechForRotation(null);
   };
 
   const handleSaveSettings = async () => {
@@ -728,34 +671,40 @@ export const Schedule: React.FC = () => {
     return weeklyHours[techId] || 0;
   };
 
+  // Get available shift options from templates
+  const getShiftOptions = () => {
+    const options = [{ value: "off", label: "OFF", display: "OFF" }];
+    for (const template of shiftTemplates) {
+      options.push({
+        value: template.name,
+        label: template.name,
+        display: template.name
+      });
+    }
+    return options;
+  };
+
+  const shiftOptions = getShiftOptions();
+
   // Weekly View Columns
   const weeklyColumns = [
     { title: "Tech", dataIndex: "name", key: "name", fixed: "left" as const, width: 120 },
     ...weekDates.map((day) => {
       const dayInfo = shopSettings ? getEffectiveDayInfo(
-        day, shopSettings.operational_hours, shopSettings.work_week, holidays, shopSettings.auto_schedule_rules.default_lunch_minutes, shopSettings.auto_schedule_rules.default_shift_hours, shiftTemplates, dailyShiftSettings
-      ) : { isOpen: true, hours: 0, timeDisplay: "", openTime: null, closeTime: null, isReducedHoliday: false };
-      
-      const shiftOptionsForDay = [
-        { value: "off", label: "OFF", display: "OFF" },
-        ...shiftTemplates.map(template => ({
-          value: `${template.start_time}-${template.end_time}`,
-          label: `${template.name} (${template.start_time}-${template.end_time})`,
-          display: `${template.start_time}-${template.end_time}`
-        }))
-      ];
+        day, {} as OperationalHours, shopSettings.work_week, holidays, shiftTemplates, dailyShiftSettings
+      ) : { isOpen: true, shiftDisplay: "WORK", shiftTemplateId: null, isReducedHoliday: false };
       
       return {
         title: (
           <div>
             <div>{day.display}</div>
             <div style={{ fontSize: "10px", color: dayInfo.isOpen ? "#4CAF50" : "#F44336" }}>
-              {dayInfo.timeDisplay}
+              {dayInfo.isOpen ? "Open" : "Closed"}
             </div>
           </div>
         ),
         key: day.date,
-        width: 140,
+        width: 100,
         render: (_: any, record: any) => {
           const currentShiftValue = schedule[record.id]?.[day.date] || "off";
           const isOpen = dayInfo.isOpen;
@@ -771,7 +720,7 @@ export const Schedule: React.FC = () => {
               style={{ width: "100%" }}
               size="small"
             >
-              {shiftOptionsForDay.map(opt => (
+              {shiftOptions.map(opt => (
                 <Option key={opt.value} value={opt.value}>{opt.display}</Option>
               ))}
             </Select>
@@ -806,12 +755,12 @@ export const Schedule: React.FC = () => {
   ];
 
   // Monthly View - Calendar Grid
-  const monthlyData = technicians.map(tech => {
+  const monthlyDataSource = technicians.map((tech) => {
     const days = monthDays.map(day => {
       const shiftValue = schedule[tech.id]?.[day.date] || "off";
       const dayInfo = shopSettings ? getEffectiveDayInfo(
-        day, shopSettings.operational_hours, shopSettings.work_week, holidays, shopSettings.auto_schedule_rules.default_lunch_minutes, shopSettings.auto_schedule_rules.default_shift_hours, shiftTemplates, dailyShiftSettings
-      ) : { isOpen: true, hours: 0, timeDisplay: "", openTime: null, closeTime: null, isReducedHoliday: false };
+        day, {} as OperationalHours, shopSettings.work_week, holidays, shiftTemplates, dailyShiftSettings
+      ) : { isOpen: true, shiftDisplay: "WORK", shiftTemplateId: null, isReducedHoliday: false };
       
       let displayText = "OFF";
       let isClosed = false;
@@ -828,10 +777,15 @@ export const Schedule: React.FC = () => {
         dayOfMonth: day.dayOfMonth,
         display: displayText,
         isClosed,
-        hours: dayInfo.hours,
       };
     });
-    return { tech, days };
+    return {
+      key: tech.id,
+      id: tech.id,
+      name: `${tech.first_name} ${tech.last_name}`,
+      days: days,
+      tech: tech,
+    };
   });
 
   const monthlyColumns = [
@@ -839,7 +793,7 @@ export const Schedule: React.FC = () => {
     ...monthDays.map((day) => ({
       title: day.display,
       key: day.date,
-      width: 90,
+      width: 80,
       render: (_: any, record: any) => {
         const dayData = record.days.find((d: any) => d.date === day.date);
         if (dayData?.isClosed) {
@@ -853,12 +807,12 @@ export const Schedule: React.FC = () => {
       },
     })),
     { 
-      title: "Total Hours", 
+      title: "Hours", 
       key: "hours", 
-      width: 80, 
+      width: 70, 
       render: (_: any, record: any) => {
-        const total = record.days.reduce((sum: number, day: any) => sum + (day.hours || 0), 0);
-        const tech = technicians.find(t => t.id === record.tech.id);
+        const total = weeklyHours[record.id] || 0;
+        const tech = technicians.find(t => t.id === record.id);
         let color = "blue";
         if (tech) {
           if (tech.min_hours > 0 && total < tech.min_hours) color = "orange";
@@ -874,17 +828,6 @@ export const Schedule: React.FC = () => {
     id: tech.id,
     name: `${tech.first_name} ${tech.last_name}`,
   }));
-
-  const monthlyDataSource = technicians.map((tech) => ({
-    key: tech.id,
-    id: tech.id,
-    name: `${tech.first_name} ${tech.last_name}`,
-    days: monthlyData.find(m => m.tech.id === tech.id)?.days || [],
-    tech: tech,
-  }));
-
-  // Rotational mode uses weekly view but with rotation logic
-  const displayDates = viewMode === "monthly" ? monthDays : weekDates;
 
   return (
     <div style={{ padding: "24px" }}>
@@ -995,9 +938,9 @@ export const Schedule: React.FC = () => {
         )}
         
         {viewMode === "monthly" ? (
-          <Table columns={monthlyColumns} dataSource={monthlyDataSource} loading={loading} pagination={false} size="small" scroll={{ x: monthDays.length * 90 }} />
+          <Table columns={monthlyColumns} dataSource={monthlyDataSource} loading={loading} pagination={false} size="small" scroll={{ x: monthDays.length * 80 }} />
         ) : (
-          <Table columns={weeklyColumns} dataSource={weeklyDataSource} loading={loading} pagination={false} size="small" scroll={{ x: weekDates.length * 140 }} />
+          <Table columns={weeklyColumns} dataSource={weeklyDataSource} loading={loading} pagination={false} size="small" scroll={{ x: weekDates.length * 100 }} />
         )}
       </Card>
       
