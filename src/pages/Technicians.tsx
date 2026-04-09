@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { Table, Button, Modal, Form, Input, Select, Space, Popconfirm, message, Card, Row, Col, Spin } from "antd";
-import { PlusOutlined, EditOutlined, DeleteOutlined } from "@ant-design/icons";
+import { Table, Button, Modal, Form, Input, Select, Space, Popconfirm, message, Card, Switch, Tooltip, Tag, Row, Col } from "antd";
+import { PlusOutlined, EditOutlined, DeleteOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import { supabaseClient } from "../utils";
 
 const { Option } = Select;
@@ -17,6 +17,7 @@ interface Technician {
   max_hours: number;
   primary_day_off: string;
   secondary_day_off: string;
+  include_in_rotation: boolean;
 }
 
 const MAX_TECHS_PER_SHOP = 10;
@@ -29,45 +30,30 @@ export const Technicians: React.FC = () => {
   const [editingTech, setEditingTech] = useState<Technician | null>(null);
   const [form] = Form.useForm();
   const [currentShopId, setCurrentShopId] = useState<string | null>(null);
-  const [isInitializing, setIsInitializing] = useState(true);
 
   useEffect(() => {
     const shopId = localStorage.getItem("currentShopId");
-    console.log("Technicians page - Current shop ID:", shopId);
-    
     if (shopId) {
       setCurrentShopId(shopId);
       loadTechnicians(shopId);
-    } else {
-      console.log("No shop ID found, waiting for selection");
-      setIsInitializing(false);
     }
   }, []);
 
   const loadTechnicians = async (shopId: string) => {
     setLoading(true);
-    try {
-      console.log("Loading technicians for shop:", shopId);
-      const { data, error } = await supabaseClient
-        .from("technicians")
-        .select("*")
-        .eq("shop_id", shopId)
-        .order("created_at", { ascending: true });
+    const { data, error } = await supabaseClient
+      .from("technicians")
+      .select("*")
+      .eq("shop_id", shopId)
+      .order("created_at", { ascending: true });
 
-      if (error) {
-        console.error("Error loading technicians:", error);
-        message.error("Failed to load technicians: " + error.message);
-      } else {
-        console.log("Loaded technicians:", data?.length || 0);
-        setTechnicians(data || []);
-      }
-    } catch (error) {
-      console.error("Unexpected error:", error);
+    if (error) {
+      console.error("Error loading technicians:", error);
       message.error("Failed to load technicians");
-    } finally {
-      setLoading(false);
-      setIsInitializing(false);
+    } else {
+      setTechnicians(data || []);
     }
+    setLoading(false);
   };
 
   const handleAdd = () => {
@@ -82,13 +68,26 @@ export const Technicians: React.FC = () => {
       max_hours: 40,
       primary_day_off: "Sunday",
       secondary_day_off: "None",
+      include_in_rotation: true,
     });
     setModalVisible(true);
   };
 
   const handleEdit = (record: Technician) => {
     setEditingTech(record);
-    form.setFieldsValue(record);
+    form.setFieldsValue({
+      first_name: record.first_name,
+      last_name: record.last_name,
+      email: record.email,
+      phone: record.phone,
+      pay_rate: record.pay_rate,
+      pay_type: record.pay_type,
+      min_hours: record.min_hours,
+      max_hours: record.max_hours,
+      primary_day_off: record.primary_day_off,
+      secondary_day_off: record.secondary_day_off,
+      include_in_rotation: record.include_in_rotation !== false,
+    });
     setModalVisible(true);
   };
 
@@ -103,7 +102,7 @@ export const Technicians: React.FC = () => {
       .eq("shop_id", currentShopId);
 
     if (error) {
-      message.error("Failed to delete technician: " + error.message);
+      message.error("Failed to delete technician");
       console.error(error);
     } else {
       message.success("Technician deleted");
@@ -115,7 +114,7 @@ export const Technicians: React.FC = () => {
 
   const handleSubmit = async (values: any) => {
     if (!currentShopId) {
-      message.error("No shop selected. Please go back and select a shop.");
+      message.error("No shop selected");
       return;
     }
     
@@ -135,6 +134,7 @@ export const Technicians: React.FC = () => {
           max_hours: values.max_hours,
           primary_day_off: values.primary_day_off,
           secondary_day_off: values.secondary_day_off,
+          include_in_rotation: values.include_in_rotation,
         })
         .eq("id", editingTech.id)
         .eq("shop_id", currentShopId);
@@ -162,6 +162,7 @@ export const Technicians: React.FC = () => {
         max_hours: values.max_hours,
         primary_day_off: values.primary_day_off,
         secondary_day_off: values.secondary_day_off,
+        include_in_rotation: values.include_in_rotation !== false,
       });
 
       if (error) {
@@ -189,6 +190,21 @@ export const Technicians: React.FC = () => {
     { title: "Primary Day Off", dataIndex: "primary_day_off", key: "primary_day_off" },
     { title: "Secondary Day Off", dataIndex: "secondary_day_off", key: "secondary_day_off" },
     {
+      title: (
+        <span>
+          Include in Rotation
+          <Tooltip title="When enabled, this technician will be included in rotational scheduling">
+            <QuestionCircleOutlined style={{ marginLeft: 8, color: "#9CA3AF" }} />
+          </Tooltip>
+        </span>
+      ),
+      dataIndex: "include_in_rotation",
+      key: "include_in_rotation",
+      render: (val: boolean) => (
+        <Tag color={val !== false ? "green" : "default"}>{val !== false ? "Yes" : "No"}</Tag>
+      ),
+    },
+    {
       title: "Actions",
       key: "actions",
       render: (_: any, record: Technician) => (
@@ -201,28 +217,6 @@ export const Technicians: React.FC = () => {
       ),
     },
   ];
-
-  if (isInitializing) {
-    return (
-      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh" }}>
-        <Spin size="large" />
-      </div>
-    );
-  }
-
-  if (!currentShopId) {
-    return (
-      <div style={{ padding: "24px", textAlign: "center" }}>
-        <Card>
-          <h2>No Shop Selected</h2>
-          <p>Please go back and select a shop to continue.</p>
-          <Button type="primary" onClick={() => window.location.href = "/"}>
-            Select Shop
-          </Button>
-        </Card>
-      </div>
-    );
-  }
 
   return (
     <div style={{ padding: "24px" }}>
@@ -242,7 +236,14 @@ export const Technicians: React.FC = () => {
             Add Technician
           </Button>
         </div>
-        <Table dataSource={technicians} columns={columns} rowKey="id" style={{ background: "transparent" }} loading={loading} scroll={{ x: 1200 }} />
+        <Table
+          dataSource={technicians}
+          columns={columns}
+          loading={loading}
+          rowKey="id"
+          style={{ background: "transparent" }}
+          scroll={{ x: 1200 }}
+        />
       </Card>
 
       <Modal
@@ -253,13 +254,19 @@ export const Technicians: React.FC = () => {
         width={600}
         destroyOnHidden
       >
-        <Form form={form} layout="vertical" onFinish={handleSubmit} initialValues={{ 
-          pay_type: "hourly",
-          min_hours: 0,
-          max_hours: 40,
-          primary_day_off: "Sunday",
-          secondary_day_off: "None"
-        }}>
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={handleSubmit}
+          initialValues={{
+            pay_type: "hourly",
+            min_hours: 0,
+            max_hours: 40,
+            primary_day_off: "Sunday",
+            secondary_day_off: "None",
+            include_in_rotation: true,
+          }}
+        >
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item name="first_name" label="First Name" rules={[{ required: true }]}>
@@ -300,12 +307,12 @@ export const Technicians: React.FC = () => {
 
           <Row gutter={16}>
             <Col span={12}>
-              <Form.Item name="min_hours" label="Min Hours / Week">
+              <Form.Item name="min_hours" label="Min Hours / Week" tooltip="Minimum weekly hours to schedule">
                 <Input type="number" min={0} max={168} />
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="max_hours" label="Max Hours / Week">
+              <Form.Item name="max_hours" label="Max Hours / Week" tooltip="Maximum weekly hours (hard limit)">
                 <Input type="number" min={0} max={168} />
               </Form.Item>
             </Col>
@@ -331,6 +338,10 @@ export const Technicians: React.FC = () => {
               </Form.Item>
             </Col>
           </Row>
+
+          <Form.Item name="include_in_rotation" label="Include in Rotational Scheduling" valuePropName="checked">
+            <Switch checkedChildren="Yes" unCheckedChildren="No" />
+          </Form.Item>
 
           <Form.Item>
             <Space>
