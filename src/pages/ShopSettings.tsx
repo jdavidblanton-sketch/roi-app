@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from "react";
-import { Card, Switch, TimePicker, Button, Space, message, Tabs, Table, Popconfirm, Input, Row, Col, Typography, InputNumber, Collapse, Alert } from "antd";
-import { PlusOutlined, DeleteOutlined, SaveOutlined } from "@ant-design/icons";
+import { Card, Switch, TimePicker, Button, Space, message, Tabs, Table, Popconfirm, Input, Row, Col, Typography, InputNumber, Collapse, Alert, Divider, Select, Tooltip, Modal, Form } from "antd";
+import { PlusOutlined, DeleteOutlined, SaveOutlined, CopyOutlined, SettingOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import { supabaseClient } from "../utils";
 import dayjs from "dayjs";
 
 const { Title, Text } = Typography;
 const { TabPane } = Tabs;
 const { Panel } = Collapse;
+const { Option } = Select;
 
 interface Holiday {
   id: string;
@@ -23,12 +24,38 @@ interface DayOverride {
   max_techs: number | null;
 }
 
+interface ShiftTemplate {
+  id: string;
+  name: string;
+  start_time: string;
+  end_time: string;
+  is_default: boolean;
+}
+
+interface DailyShiftSetting {
+  day: string;
+  template_id: string | null;
+  custom_start: string | null;
+  custom_end: string | null;
+}
+
 const daysOfWeek = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 const dayLabels = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+const defaultShiftTemplates: ShiftTemplate[] = [
+  { id: "1", name: "Morning", start_time: "07:30", end_time: "16:00", is_default: true },
+  { id: "2", name: "Mid", start_time: "08:30", end_time: "17:00", is_default: false },
+  { id: "3", name: "Late", start_time: "09:30", end_time: "18:00", is_default: false },
+];
 
 // Initialize day overrides with all days
 const getInitialDayOverrides = (): DayOverride[] => {
   return daysOfWeek.map(day => ({ day, min_techs: null, max_techs: null }));
+};
+
+// Initialize daily shift settings
+const getInitialDailyShiftSettings = (): DailyShiftSetting[] => {
+  return daysOfWeek.map(day => ({ day, template_id: "1", custom_start: null, custom_end: null }));
 };
 
 export const ShopSettings: React.FC = () => {
@@ -43,15 +70,25 @@ export const ShopSettings: React.FC = () => {
     saturday: false,
     sunday: false,
   });
+  
+  // Operational hours (legacy - will be replaced by shift templates)
   const [operationalHours, setOperationalHours] = useState({
-    monday: { open: dayjs("07:30", "HH:mm"), close: dayjs("18:00", "HH:mm") },
-    tuesday: { open: dayjs("07:30", "HH:mm"), close: dayjs("18:00", "HH:mm") },
-    wednesday: { open: dayjs("07:30", "HH:mm"), close: dayjs("18:00", "HH:mm") },
-    thursday: { open: dayjs("07:30", "HH:mm"), close: dayjs("18:00", "HH:mm") },
-    friday: { open: dayjs("07:30", "HH:mm"), close: dayjs("18:00", "HH:mm") },
+    monday: { open: dayjs("07:30", "HH:mm"), close: dayjs("16:00", "HH:mm") },
+    tuesday: { open: dayjs("07:30", "HH:mm"), close: dayjs("16:00", "HH:mm") },
+    wednesday: { open: dayjs("07:30", "HH:mm"), close: dayjs("16:00", "HH:mm") },
+    thursday: { open: dayjs("07:30", "HH:mm"), close: dayjs("16:00", "HH:mm") },
+    friday: { open: dayjs("07:30", "HH:mm"), close: dayjs("16:00", "HH:mm") },
     saturday: { open: dayjs("08:00", "HH:mm"), close: dayjs("16:00", "HH:mm") },
     sunday: { open: null, close: null },
   });
+  
+  // Shift templates
+  const [shiftTemplates, setShiftTemplates] = useState<ShiftTemplate[]>(defaultShiftTemplates);
+  const [dailyShiftSettings, setDailyShiftSettings] = useState<DailyShiftSetting[]>(getInitialDailyShiftSettings());
+  const [templateModalVisible, setTemplateModalVisible] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState<ShiftTemplate | null>(null);
+  const [templateForm] = Form.useForm();
+  
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [newHoliday, setNewHoliday] = useState({
     name: "",
@@ -65,6 +102,8 @@ export const ShopSettings: React.FC = () => {
     max_techs_per_shift: 3,
     respect_day_off: true,
     respect_hours_limits: true,
+    manual_override_enabled: false,
+    manual_override_weeks: 0,
   });
   
   const [enableAdvancedOverrides, setEnableAdvancedOverrides] = useState(false);
@@ -96,6 +135,8 @@ export const ShopSettings: React.FC = () => {
       console.error("Error loading settings:", error);
     } else if (data) {
       setWorkWeek(data.work_week || workWeek);
+      
+      // Load operational hours
       if (data.operational_hours) {
         const hours: any = {};
         Object.keys(data.operational_hours).forEach((day) => {
@@ -107,6 +148,17 @@ export const ShopSettings: React.FC = () => {
         });
         setOperationalHours(hours);
       }
+      
+      // Load shift templates
+      if (data.shift_templates) {
+        setShiftTemplates(data.shift_templates);
+      }
+      
+      // Load daily shift settings
+      if (data.daily_shift_settings) {
+        setDailyShiftSettings(data.daily_shift_settings);
+      }
+      
       setHolidays(data.holidays || []);
       setAutoRules(data.auto_schedule_rules || autoRules);
       
@@ -152,6 +204,8 @@ export const ShopSettings: React.FC = () => {
         shop_id: currentShopId,
         work_week: workWeek,
         operational_hours: formattedHours,
+        shift_templates: shiftTemplates,
+        daily_shift_settings: dailyShiftSettings,
         holidays: holidays,
         auto_schedule_rules: autoRules,
         advanced_settings: advanced_settings,
@@ -194,6 +248,114 @@ export const ShopSettings: React.FC = () => {
       [shift]: { ...prev[shift], [field]: value }
     }));
   };
+
+  // Shift template functions
+  const handleAddTemplate = () => {
+    setEditingTemplate(null);
+    templateForm.resetFields();
+    setTemplateModalVisible(true);
+  };
+
+  const handleEditTemplate = (template: ShiftTemplate) => {
+    setEditingTemplate(template);
+    templateForm.setFieldsValue(template);
+    setTemplateModalVisible(true);
+  };
+
+  const handleDeleteTemplate = (id: string) => {
+    setShiftTemplates(shiftTemplates.filter(t => t.id !== id));
+    message.success("Shift template deleted");
+  };
+
+  const handleSaveTemplate = (values: any) => {
+    if (editingTemplate) {
+      setShiftTemplates(shiftTemplates.map(t => 
+        t.id === editingTemplate.id ? { ...t, ...values } : t
+      ));
+      message.success("Shift template updated");
+    } else {
+      const newTemplate: ShiftTemplate = {
+        id: Date.now().toString(),
+        ...values,
+        is_default: false,
+      };
+      setShiftTemplates([...shiftTemplates, newTemplate]);
+      message.success("Shift template added");
+    }
+    setTemplateModalVisible(false);
+    templateForm.resetFields();
+  };
+
+  const handleCopyHoursToAll = (sourceDay: string) => {
+    const sourceHours = operationalHours[sourceDay as keyof typeof operationalHours];
+    if (!sourceHours.open || !sourceHours.close) {
+      message.error("Source day has no hours set");
+      return;
+    }
+    
+    const newHours = { ...operationalHours };
+    daysOfWeek.forEach(day => {
+      if (workWeek[day as keyof typeof workWeek]) {
+        newHours[day as keyof typeof operationalHours] = {
+          open: sourceHours.open,
+          close: sourceHours.close,
+        };
+      }
+    });
+    setOperationalHours(newHours);
+    message.success("Hours copied to all open days");
+  };
+
+  const handleApplyShiftTemplateToDay = (day: string, templateId: string) => {
+    const template = shiftTemplates.find(t => t.id === templateId);
+    if (template) {
+      setDailyShiftSettings(prev => prev.map(d => 
+        d.day === day ? { ...d, template_id: templateId, custom_start: null, custom_end: null } : d
+      ));
+      
+      // Also update operational hours for backward compatibility
+      const newHours = { ...operationalHours };
+      newHours[day as keyof typeof operationalHours] = {
+        open: dayjs(template.start_time, "HH:mm"),
+        close: dayjs(template.end_time, "HH:mm"),
+      };
+      setOperationalHours(newHours);
+      message.success(`Applied "${template.name}" shift to ${dayLabels[daysOfWeek.indexOf(day)]}`);
+    }
+  };
+
+  const handleCopyShiftToAll = (templateId: string) => {
+    const template = shiftTemplates.find(t => t.id === templateId);
+    if (template) {
+      const newSettings = dailyShiftSettings.map(d => ({
+        ...d,
+        template_id: templateId,
+        custom_start: null,
+        custom_end: null,
+      }));
+      setDailyShiftSettings(newSettings);
+      
+      // Also update operational hours for all days
+      const newHours = { ...operationalHours };
+      daysOfWeek.forEach(day => {
+        if (workWeek[day as keyof typeof workWeek]) {
+          newHours[day as keyof typeof operationalHours] = {
+            open: dayjs(template.start_time, "HH:mm"),
+            close: dayjs(template.end_time, "HH:mm"),
+          };
+        }
+      });
+      setOperationalHours(newHours);
+      message.success(`Applied "${template.name}" shift to all days`);
+    }
+  };
+
+  const getOpenDaysCount = (): number => {
+    return Object.values(workWeek).filter(v => v === true).length;
+  };
+
+  const openDaysCount = getOpenDaysCount();
+  const isDayOffRespected = openDaysCount > 5;
 
   // Columns for the day overrides table
   const dayOverrideColumns = [
@@ -258,6 +420,14 @@ export const ShopSettings: React.FC = () => {
           </Button>
         </div>
 
+        <Alert
+          message="Priority-Based Scheduling"
+          description="Settings are applied in priority order: Shop Hours → Coverage Requirements → Tech Preferences. Day off preferences are only respected if shop is open more than 5 days per week."
+          type="info"
+          showIcon
+          style={{ marginBottom: "16px", background: "rgba(46,125,50,0.2)", borderColor: "#2E7D32" }}
+        />
+
         <Tabs defaultActiveKey="workweek" style={{ color: "#E5E7EB" }}>
           <TabPane tab="Work Week" key="workweek">
             <Row gutter={[16, 16]}>
@@ -284,9 +454,110 @@ export const ShopSettings: React.FC = () => {
                 </Col>
               ))}
             </Row>
+            <Divider style={{ borderColor: "rgba(255,255,255,0.1)", margin: "16px 0" }} />
+            <Alert
+              message={`Shop is open ${openDaysCount} days per week. ${isDayOffRespected ? "Tech day off preferences WILL be respected." : "Tech day off preferences will be IGNORED (shop open 5 days or less)."}`}
+              type={isDayOffRespected ? "success" : "warning"}
+              showIcon
+              style={{ background: "rgba(46,125,50,0.15)", borderColor: isDayOffRespected ? "#2E7D32" : "#E65100" }}
+            />
+          </TabPane>
+
+          <TabPane tab="Shift Templates" key="shift_templates">
+            <Alert
+              message="Shift Templates"
+              description="Define named shifts (e.g., Morning, Mid, Late) and apply them to days. You can set each day individually or copy to all."
+              type="info"
+              showIcon
+              style={{ marginBottom: "16px", background: "rgba(46,125,50,0.2)", borderColor: "#2E7D32" }}
+            />
+            
+            <div style={{ marginBottom: "16px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                <Text style={{ color: "#E5E7EB", fontSize: "16px" }}>Shift Templates</Text>
+                <Button type="primary" icon={<PlusOutlined />} onClick={handleAddTemplate} style={{ backgroundColor: "#2E7D32" }} size="small">
+                  Add Template
+                </Button>
+              </div>
+              <Table
+                dataSource={shiftTemplates}
+                rowKey="id"
+                pagination={false}
+                size="small"
+                columns={[
+                  { title: "Name", dataIndex: "name", key: "name" },
+                  { title: "Start Time", dataIndex: "start_time", key: "start_time" },
+                  { title: "End Time", dataIndex: "end_time", key: "end_time" },
+                  { title: "Default", dataIndex: "is_default", key: "is_default", render: (val: boolean) => val ? <Tag color="green">Default</Tag> : null },
+                  {
+                    title: "Actions",
+                    key: "actions",
+                    render: (_: any, record: ShiftTemplate) => (
+                      <Space>
+                        <Button type="link" size="small" onClick={() => handleEditTemplate(record)}>Edit</Button>
+                        <Popconfirm title="Delete this template?" onConfirm={() => handleDeleteTemplate(record.id)}>
+                          <Button type="link" danger size="small">Delete</Button>
+                        </Popconfirm>
+                      </Space>
+                    ),
+                  },
+                ]}
+              />
+            </div>
+
+            <Divider style={{ borderColor: "rgba(255,255,255,0.1)", margin: "16px 0" }} />
+
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                <Text style={{ color: "#E5E7EB", fontSize: "16px" }}>Daily Shift Assignments</Text>
+                <Button 
+                  icon={<CopyOutlined />} 
+                  onClick={() => {
+                    const defaultTemplate = shiftTemplates.find(t => t.is_default) || shiftTemplates[0];
+                    if (defaultTemplate) handleCopyShiftToAll(defaultTemplate.id);
+                  }}
+                  size="small"
+                >
+                  Copy Default to All Days
+                </Button>
+              </div>
+              <Table
+                dataSource={dailyShiftSettings}
+                rowKey="day"
+                pagination={false}
+                size="small"
+                columns={[
+                  { title: "Day", dataIndex: "day", key: "day", render: (day: string) => dayLabels[daysOfWeek.indexOf(day)] },
+                  {
+                    title: "Assigned Shift",
+                    key: "template_id",
+                    render: (_: any, record: DailyShiftSetting) => (
+                      <Select
+                        value={record.template_id}
+                        onChange={(val) => handleApplyShiftTemplateToDay(record.day, val)}
+                        style={{ width: "200px" }}
+                        size="small"
+                      >
+                        {shiftTemplates.map(template => (
+                          <Option key={template.id} value={template.id}>{template.name} ({template.start_time}-{template.end_time})</Option>
+                        ))}
+                      </Select>
+                    ),
+                  },
+                ]}
+              />
+            </div>
           </TabPane>
 
           <TabPane tab="Operational Hours" key="hours">
+            <Alert
+              message="Daily Hours"
+              description="Set custom hours for each day. Use 'Copy to All Open Days' to apply the same hours to all days the shop is open."
+              type="info"
+              showIcon
+              style={{ marginBottom: "16px", background: "rgba(46,125,50,0.2)", borderColor: "#2E7D32" }}
+            />
+            
             <div style={{ maxHeight: "500px", overflowY: "auto" }}>
               {daysOfWeek.map((day, index) => (
                 <div
@@ -298,9 +569,20 @@ export const ShopSettings: React.FC = () => {
                     borderRadius: "8px",
                   }}
                 >
-                  <Title level={4} style={{ color: "#E5E7EB", marginBottom: "12px" }}>
-                    {dayLabels[index]}
-                  </Title>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                    <Title level={4} style={{ color: "#E5E7EB", marginBottom: 0 }}>
+                      {dayLabels[index]}
+                    </Title>
+                    {workWeek[day as keyof typeof workWeek] && (
+                      <Button 
+                        size="small" 
+                        icon={<CopyOutlined />}
+                        onClick={() => handleCopyHoursToAll(day)}
+                      >
+                        Copy to All Open Days
+                      </Button>
+                    )}
+                  </div>
                   {workWeek[day as keyof typeof workWeek] ? (
                     <Space>
                       <TimePicker
@@ -412,7 +694,7 @@ export const ShopSettings: React.FC = () => {
           </TabPane>
 
           <TabPane tab="Auto Schedule Rules" key="rules">
-            <div style={{ maxWidth: "400px" }}>
+            <div style={{ maxWidth: "500px" }}>
               <div
                 style={{
                   marginBottom: "16px",
@@ -421,7 +703,12 @@ export const ShopSettings: React.FC = () => {
                   borderRadius: "8px",
                 }}
               >
-                <Text style={{ color: "#E5E7EB", display: "block", marginBottom: "8px" }}>Default Minimum technicians per shift</Text>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                  <Text style={{ color: "#E5E7EB" }}>Default Minimum technicians per shift</Text>
+                  <Tooltip title="The absolute minimum number of technicians that MUST work each day. Cannot be violated.">
+                    <QuestionCircleOutlined style={{ color: "#9CA3AF" }} />
+                  </Tooltip>
+                </div>
                 <InputNumber
                   value={autoRules.min_techs_per_shift}
                   onChange={(val) => setAutoRules({ ...autoRules, min_techs_per_shift: val || 1 })}
@@ -438,7 +725,12 @@ export const ShopSettings: React.FC = () => {
                   borderRadius: "8px",
                 }}
               >
-                <Text style={{ color: "#E5E7EB", display: "block", marginBottom: "8px" }}>Default Maximum technicians per shift</Text>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                  <Text style={{ color: "#E5E7EB" }}>Default Maximum technicians per shift</Text>
+                  <Tooltip title="The maximum number of technicians that can work each day. Cannot be exceeded.">
+                    <QuestionCircleOutlined style={{ color: "#9CA3AF" }} />
+                  </Tooltip>
+                </div>
                 <InputNumber
                   value={autoRules.max_techs_per_shift}
                   onChange={(val) => setAutoRules({ ...autoRules, max_techs_per_shift: val || 3 })}
@@ -457,11 +749,20 @@ export const ShopSettings: React.FC = () => {
               >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <Text style={{ color: "#E5E7EB" }}>Respect technician day-off preferences</Text>
-                  <Switch
-                    checked={autoRules.respect_day_off}
-                    onChange={(checked) => setAutoRules({ ...autoRules, respect_day_off: checked })}
-                  />
+                  <Tooltip title={!isDayOffRespected ? "Shop is open 5 days or less - day off preferences will be ignored" : "When enabled, system tries not to schedule techs on their preferred days off"}>
+                    <QuestionCircleOutlined style={{ color: "#9CA3AF" }} />
+                  </Tooltip>
                 </div>
+                <Switch
+                  checked={autoRules.respect_day_off && isDayOffRespected}
+                  onChange={(checked) => setAutoRules({ ...autoRules, respect_day_off: checked })}
+                  disabled={!isDayOffRespected}
+                />
+                {!isDayOffRespected && (
+                  <Text style={{ color: "#E65100", fontSize: "12px", display: "block", marginTop: "8px" }}>
+                    Day off preferences ignored because shop is open 5 days or less.
+                  </Text>
+                )}
               </div>
               <div
                 style={{
@@ -473,12 +774,56 @@ export const ShopSettings: React.FC = () => {
               >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <Text style={{ color: "#E5E7EB" }}>Respect technician min/max hour limits</Text>
-                  <Switch
-                    checked={autoRules.respect_hours_limits}
-                    onChange={(checked) => setAutoRules({ ...autoRules, respect_hours_limits: checked })}
-                  />
+                  <Tooltip title="Min hours are adhered to first. Max hours are only used if necessary for coverage.">
+                    <QuestionCircleOutlined style={{ color: "#9CA3AF" }} />
+                  </Tooltip>
                 </div>
+                <Switch
+                  checked={autoRules.respect_hours_limits}
+                  onChange={(checked) => setAutoRules({ ...autoRules, respect_hours_limits: checked })}
+                />
               </div>
+              <Divider style={{ borderColor: "rgba(255,255,255,0.1)" }} />
+              <div
+                style={{
+                  marginBottom: "16px",
+                  padding: "16px",
+                  background: "rgba(255,255,255,0.05)",
+                  borderRadius: "8px",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <Text style={{ color: "#E5E7EB" }}>Manual Override Mode</Text>
+                  <Tooltip title="When enabled, operator can force schedules (e.g., 4x10 hour days) that bypass normal rules">
+                    <QuestionCircleOutlined style={{ color: "#9CA3AF" }} />
+                  </Tooltip>
+                </div>
+                <Switch
+                  checked={autoRules.manual_override_enabled}
+                  onChange={(checked) => setAutoRules({ ...autoRules, manual_override_enabled: checked })}
+                />
+              </div>
+              {autoRules.manual_override_enabled && (
+                <div
+                  style={{
+                    padding: "16px",
+                    background: "rgba(255,255,255,0.03)",
+                    borderRadius: "8px",
+                  }}
+                >
+                  <Text style={{ color: "#E5E7EB", display: "block", marginBottom: "8px" }}>Override Duration (weeks)</Text>
+                  <InputNumber
+                    value={autoRules.manual_override_weeks}
+                    onChange={(val) => setAutoRules({ ...autoRules, manual_override_weeks: val || 0 })}
+                    min={0}
+                    max={52}
+                    style={{ width: "100px" }}
+                  />
+                  <Text style={{ color: "#9CA3AF", fontSize: "12px", display: "block", marginTop: "8px" }}>
+                    0 = indefinite, otherwise applies for specified number of weeks
+                  </Text>
+                </div>
+              )}
             </div>
           </TabPane>
 
@@ -570,6 +915,35 @@ export const ShopSettings: React.FC = () => {
           </TabPane>
         </Tabs>
       </Card>
+
+      {/* Shift Template Modal */}
+      <Modal
+        title={editingTemplate ? "Edit Shift Template" : "Add Shift Template"}
+        open={templateModalVisible}
+        onCancel={() => setTemplateModalVisible(false)}
+        footer={null}
+        destroyOnClose
+      >
+        <Form form={templateForm} layout="vertical" onFinish={handleSaveTemplate}>
+          <Form.Item name="name" label="Shift Name" rules={[{ required: true }]}>
+            <Input placeholder="e.g., Morning, Mid, Late" />
+          </Form.Item>
+          <Form.Item name="start_time" label="Start Time" rules={[{ required: true }]}>
+            <TimePicker format="HH:mm" style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item name="end_time" label="End Time" rules={[{ required: true }]}>
+            <TimePicker format="HH:mm" style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item>
+            <Space>
+              <Button type="primary" htmlType="submit" style={{ backgroundColor: "#2E7D32" }}>
+                {editingTemplate ? "Update" : "Add"}
+              </Button>
+              <Button onClick={() => setTemplateModalVisible(false)}>Cancel</Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 };
