@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from "react";
 import { Table, Button, Select, Card, message, Switch, Space, Radio, Modal, Checkbox, Tag, Tooltip, Alert, InputNumber, Divider, Statistic, Row, Col } from "antd";
-import { SaveOutlined, ThunderboltOutlined, LeftOutlined, RightOutlined, CopyOutlined, WarningOutlined, DollarOutlined, ClockCircleOutlined } from "@ant-design/icons";
+import { SaveOutlined, ThunderboltOutlined, LeftOutlined, RightOutlined, CopyOutlined, WarningOutlined, DollarOutlined, ClockCircleOutlined, SettingOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import { supabaseClient } from "../utils";
 
 const { Option } = Select;
+const { Text } = Typography;
+import { Typography } from "antd";
 
 interface Technician {
   id: string;
@@ -487,18 +489,17 @@ export const Schedule: React.FC = () => {
     });
     setSchedule(scheduleMap);
     
-    // Recalculate hours and pay
     if (shopSettings) {
       let tempHours: Record<string, number> = {};
       let tempPay: Record<string, number> = {};
       let tempTotal = 0;
       for (const tech of technicians) {
         let total = 0;
-        for (const day of dateStrings.map((d, idx) => ({ date: d, dayKey: daysOfWeek[new Date(d).getDay() - 1] }))) {
+        for (const day of weekDates) {
           const shiftValue = scheduleMap[tech.id]?.[day.date] || "off";
           if (shiftValue !== "off") {
             const dayInfo = getEffectiveDayInfo(
-              { date: day.date, dayKey: day.dayKey, name: dayLabels[daysOfWeek.indexOf(day.dayKey)] },
+              day,
               shopSettings.operational_hours,
               shopSettings.work_week,
               holidays,
@@ -521,7 +522,6 @@ export const Schedule: React.FC = () => {
     const newSchedule = { ...schedule, [techId]: { ...schedule[techId], [date]: shiftType } };
     setSchedule(newSchedule);
     
-    // Recalculate hours and pay for this tech
     if (shopSettings) {
       let total = 0;
       const dates = viewMode === "monthly" ? monthWeeks.flatMap(w => w.dates) : weekDates;
