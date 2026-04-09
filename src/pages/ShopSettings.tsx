@@ -32,14 +32,6 @@ interface ShiftTemplate {
   is_default: boolean;
 }
 
-interface DailyShiftSetting {
-  day: string;
-  template_id: string | null;
-  custom_name: string | null;
-  custom_start: string | null;
-  custom_end: string | null;
-}
-
 interface OperationalHoursState {
   monday: { open: Dayjs | null; close: Dayjs | null };
   tuesday: { open: Dayjs | null; close: Dayjs | null };
@@ -61,10 +53,6 @@ const defaultShiftTemplates: ShiftTemplate[] = [
 
 const getInitialDayOverrides = (): DayOverride[] => {
   return daysOfWeek.map(day => ({ day, min_techs: null, max_techs: null }));
-};
-
-const getInitialDailyShiftSettings = (): DailyShiftSetting[] => {
-  return daysOfWeek.map(day => ({ day, template_id: "1", custom_name: null, custom_start: null, custom_end: null }));
 };
 
 export const ShopSettings: React.FC = () => {
@@ -91,7 +79,6 @@ export const ShopSettings: React.FC = () => {
   });
   
   const [shiftTemplates, setShiftTemplates] = useState<ShiftTemplate[]>(defaultShiftTemplates);
-  const [dailyShiftSettings, setDailyShiftSettings] = useState<DailyShiftSetting[]>(getInitialDailyShiftSettings());
   const [templateModalVisible, setTemplateModalVisible] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<ShiftTemplate | null>(null);
   const [templateForm] = Form.useForm();
@@ -161,10 +148,6 @@ export const ShopSettings: React.FC = () => {
         setShiftTemplates(data.shift_templates);
       }
       
-      if (data.daily_shift_settings) {
-        setDailyShiftSettings(data.daily_shift_settings);
-      }
-      
       setHolidays(data.holidays || []);
       setAutoRules({
         ...autoRules,
@@ -217,7 +200,6 @@ export const ShopSettings: React.FC = () => {
         work_week: workWeek,
         operational_hours: formattedHours,
         shift_templates: shiftTemplates,
-        daily_shift_settings: dailyShiftSettings,
         holidays: holidays,
         auto_schedule_rules: autoRules,
         advanced_settings: advanced_settings,
@@ -324,70 +306,6 @@ export const ShopSettings: React.FC = () => {
     });
     setOperationalHours(newHours);
     message.success("Hours copied to all open days");
-  };
-
-  const handleApplyShiftTemplateToDay = (day: string, templateId: string) => {
-    const template = shiftTemplates.find(t => t.id === templateId);
-    if (template) {
-      // Create display text: either custom name or time range
-      let customName = null;
-      if (template.name && !["Morning", "Mid", "Late"].includes(template.name)) {
-        customName = template.name;
-      }
-      
-      setDailyShiftSettings(prev => prev.map(d => 
-        d.day === day ? { 
-          ...d, 
-          template_id: templateId, 
-          custom_name: customName,
-          custom_start: null, 
-          custom_end: null 
-        } : d
-      ));
-      
-      const newHours = { ...operationalHours };
-      newHours[day as keyof OperationalHoursState] = {
-        open: dayjs(template.start_time, "HH:mm"),
-        close: dayjs(template.end_time, "HH:mm"),
-      };
-      setOperationalHours(newHours);
-      
-      const displayName = customName || `${template.start_time}-${template.end_time}`;
-      message.success(`Applied "${displayName}" shift to ${dayLabels[daysOfWeek.indexOf(day)]}`);
-    }
-  };
-
-  const handleCopyShiftToAll = (templateId: string) => {
-    const template = shiftTemplates.find(t => t.id === templateId);
-    if (template) {
-      let customName = null;
-      if (template.name && !["Morning", "Mid", "Late"].includes(template.name)) {
-        customName = template.name;
-      }
-      
-      const newSettings = dailyShiftSettings.map(d => ({
-        ...d,
-        template_id: templateId,
-        custom_name: customName,
-        custom_start: null,
-        custom_end: null,
-      }));
-      setDailyShiftSettings(newSettings);
-      
-      const newHours = { ...operationalHours };
-      daysOfWeek.forEach(day => {
-        if (workWeek[day as keyof typeof workWeek]) {
-          newHours[day as keyof OperationalHoursState] = {
-            open: dayjs(template.start_time, "HH:mm"),
-            close: dayjs(template.end_time, "HH:mm"),
-          };
-        }
-      });
-      setOperationalHours(newHours);
-      
-      const displayName = customName || `${template.start_time}-${template.end_time}`;
-      message.success(`Applied "${displayName}" shift to all days`);
-    }
   };
 
   const getOpenDaysCount = (): number => {
@@ -505,7 +423,7 @@ export const ShopSettings: React.FC = () => {
           <TabPane tab="Shift Templates" key="shift_templates">
             <Alert
               message="Shift Templates"
-              description="Define named shifts. The display name will show in the schedule. If no custom name is set, the time range will be shown."
+              description="Define shifts that technicians can be assigned to. The default shift will be used for auto-scheduling."
               type="info"
               showIcon
               style={{ marginBottom: "16px", background: "rgba(46,125,50,0.2)", borderColor: "#2E7D32" }}
@@ -527,7 +445,10 @@ export const ShopSettings: React.FC = () => {
                   { title: "Name", dataIndex: "name", key: "name" },
                   { title: "Start Time", dataIndex: "start_time", key: "start_time" },
                   { title: "End Time", dataIndex: "end_time", key: "end_time" },
-                  { title: "Display", key: "display", render: (_, record) => {
+                  { 
+                    title: "Display", 
+                    key: "display", 
+                    render: (_, record) => {
                       if (record.name && !["Morning", "Mid", "Late"].includes(record.name)) {
                         return <Tag color="blue">{record.name}</Tag>;
                       }
@@ -546,65 +467,6 @@ export const ShopSettings: React.FC = () => {
                         </Popconfirm>
                       </Space>
                     ),
-                  },
-                ]}
-              />
-            </div>
-
-            <Divider style={{ borderColor: "rgba(255,255,255,0.1)", margin: "16px 0" }} />
-
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-                <Text style={{ color: "#E5E7EB", fontSize: "16px" }}>Daily Shift Assignments</Text>
-                <Button 
-                  icon={<CopyOutlined />} 
-                  onClick={() => {
-                    const defaultTemplate = shiftTemplates.find(t => t.is_default) || shiftTemplates[0];
-                    if (defaultTemplate) handleCopyShiftToAll(defaultTemplate.id);
-                  }}
-                  size="small"
-                >
-                  Copy Default to All Days
-                </Button>
-              </div>
-              <Table
-                dataSource={dailyShiftSettings}
-                rowKey="day"
-                pagination={false}
-                size="small"
-                columns={[
-                  { title: "Day", dataIndex: "day", key: "day", render: (day: string) => dayLabels[daysOfWeek.indexOf(day)] },
-                  {
-                    title: "Assigned Shift",
-                    key: "template_id",
-                    render: (_: any, record: DailyShiftSetting) => {
-                      const template = shiftTemplates.find(t => t.id === record.template_id);
-                      if (!template) return <Text type="secondary">No shift assigned</Text>;
-                      
-                      let displayText = `${template.start_time}-${template.end_time}`;
-                      if (template.name && !["Morning", "Mid", "Late"].includes(template.name)) {
-                        displayText = template.name;
-                      }
-                      
-                      return (
-                        <Select
-                          value={record.template_id}
-                          onChange={(val) => handleApplyShiftTemplateToDay(record.day, val)}
-                          style={{ width: "250px" }}
-                          size="small"
-                        >
-                          {shiftTemplates.map(template => {
-                            let optionText = `${template.start_time}-${template.end_time}`;
-                            if (template.name && !["Morning", "Mid", "Late"].includes(template.name)) {
-                              optionText = template.name;
-                            }
-                            return (
-                              <Option key={template.id} value={template.id}>{optionText}</Option>
-                            );
-                          })}
-                        </Select>
-                      );
-                    },
                   },
                 ]}
               />
