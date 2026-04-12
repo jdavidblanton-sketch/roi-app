@@ -428,7 +428,7 @@ export const ShopSettings: React.FC = () => {
                   onChange={(val) => setAutoRules({ ...autoRules, min_techs_per_shift: val || 1 })}
                   min={0}
                   max={10}
-                  style={{ width: "100px" }}
+                  style={{ width: "120px" }}
                 />
               </div>
 
@@ -451,7 +451,7 @@ export const ShopSettings: React.FC = () => {
                   onChange={(val) => setAutoRules({ ...autoRules, max_techs_per_shift: val || 3 })}
                   min={1}
                   max={20}
-                  style={{ width: "100px" }}
+                  style={{ width: "120px" }}
                 />
               </div>
 
@@ -475,7 +475,7 @@ export const ShopSettings: React.FC = () => {
                   min={4}
                   max={12}
                   step={0.5}
-                  style={{ width: "100px" }}
+                  style={{ width: "120px" }}
                   addonAfter="hours"
                 />
               </div>
@@ -500,9 +500,12 @@ export const ShopSettings: React.FC = () => {
                   min={0}
                   max={120}
                   step={15}
-                  style={{ width: "100px" }}
+                  style={{ width: "120px" }}
                   addonAfter="minutes"
                 />
+                <Text style={{ color: "#9CA3AF", fontSize: "12px", marginLeft: "8px" }}>
+                  (30 min default)
+                </Text>
               </div>
 
               <Divider style={{ borderColor: "rgba(255,255,255,0.1)" }} />
@@ -562,8 +565,8 @@ export const ShopSettings: React.FC = () => {
                   borderRadius: "8px",
                 }}
               >
-                <Text style={{ color: "#9CA3AF", fontSize: "12px" }}>
-                  Paid hours per shift: {autoRules.target_shift_hours} - {autoRules.lunch_minutes}/60 = {(autoRules.target_shift_hours - (autoRules.lunch_minutes / 60)).toFixed(1)} hours
+                <Text style={{ color: "#4CAF50", fontSize: "14px", fontWeight: "bold" }}>
+                  Example: {autoRules.target_shift_hours} hour shift - {autoRules.lunch_minutes} min lunch = {(autoRules.target_shift_hours - (autoRules.lunch_minutes / 60)).toFixed(1)} paid hours
                 </Text>
               </div>
             </div>
