@@ -97,8 +97,8 @@ const getMonthDates = (startDate: Dayjs) => {
   const year = startDate.year();
   const month = startDate.month();
   const firstDayOfMonth = dayjs(new Date(year, month, 1));
-  const startDayOfWeek = firstDayOfMonth.day(); // 0 = Sunday
-  const startOffset = startDayOfWeek === 0 ? 6 : startDayOfWeek - 1; // Adjust to Monday start
+  const startDayOfWeek = firstDayOfMonth.day();
+  const startOffset = startDayOfWeek === 0 ? 6 : startDayOfWeek - 1;
   const calendarStart = firstDayOfMonth.subtract(startOffset, "day");
   
   const weeks = [];
@@ -377,7 +377,10 @@ export const Schedule: React.FC = () => {
       .select("*")
       .eq("shop_id", currentShopId)
       .in("date", dateStrings);
-    if (scheduleError) throw scheduleError;
+    if (scheduleError) {
+      console.error("Error loading schedule:", scheduleError);
+      return;
+    }
 
     const scheduleMap: Record<string, Record<string, string>> = {};
     technicians.forEach((tech) => {
@@ -612,7 +615,6 @@ export const Schedule: React.FC = () => {
 
   const shiftOptions = getShiftOptions();
 
-  // List View Columns
   const listColumns = [
     { title: "Tech", dataIndex: "name", key: "name", fixed: "left" as const, width: 150 },
     ...dates.map((day) => {
@@ -675,7 +677,6 @@ export const Schedule: React.FC = () => {
     name: `${tech.first_name} ${tech.last_name}`,
   }));
 
-  // Calendar View Render
   const renderCalendarView = () => {
     if (duration === "week") {
       const weekDates = dates;
@@ -894,7 +895,6 @@ export const Schedule: React.FC = () => {
         )}
       </Card>
       
-      {/* Save as Template Modal */}
       <Modal
         title="Save as Template"
         open={saveTemplateModalVisible}
@@ -911,7 +911,6 @@ export const Schedule: React.FC = () => {
         />
       </Modal>
       
-      {/* Load Template Modal */}
       <Modal
         title="Load Template"
         open={loadTemplateModalVisible}
@@ -939,7 +938,6 @@ export const Schedule: React.FC = () => {
         />
       </Modal>
       
-      {/* Settings Modal */}
       <Modal
         title="Schedule Settings"
         open={settingsModalVisible}
