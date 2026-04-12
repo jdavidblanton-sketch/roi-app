@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { Table, Button, Modal, Form, Input, Select, Space, Popconfirm, message, Card, Switch, Tooltip, Tag, Row, Col } from "antd";
-import { PlusOutlined, EditOutlined, DeleteOutlined, QuestionCircleOutlined } from "@ant-design/icons";
+import { Table, Button, Modal, Form, Input, Select, Space, Popconfirm, message, Card, Row, Col, Switch, InputNumber } from "antd";
+import { PlusOutlined, EditOutlined, DeleteOutlined } from "@ant-design/icons";
 import { supabaseClient } from "../utils";
 
 const { Option } = Select;
@@ -11,8 +11,11 @@ interface Technician {
   last_name: string;
   email: string;
   phone: string;
+  role: string;
   pay_rate: number;
-  pay_type: "hourly" | "flat" | "flag";
+  pay_type: "hourly" | "salary" | "flat" | "flag";
+  is_salary: boolean;
+  include_in_scheduling: boolean;
   min_hours: number;
   max_hours: number;
   primary_day_off: string;
@@ -21,7 +24,8 @@ interface Technician {
 }
 
 const MAX_TECHS_PER_SHOP = 10;
-const DAYS_OF_WEEK = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "None"];
+const DAYS_OF_WEEK = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "None"];
+const ROLES = ["Manager", "Assistant Manager", "Foreman", "Service Advisor", "Master Technician", "Technician", "Lube Tech", "Other"];
 
 export const Technicians: React.FC = () => {
   const [technicians, setTechnicians] = useState<Technician[]>([]);
@@ -30,6 +34,7 @@ export const Technicians: React.FC = () => {
   const [editingTech, setEditingTech] = useState<Technician | null>(null);
   const [form] = Form.useForm();
   const [currentShopId, setCurrentShopId] = useState<string | null>(null);
+  const [isSalary, setIsSalary] = useState(false);
 
   useEffect(() => {
     const shopId = localStorage.getItem("currentShopId");
@@ -62,32 +67,25 @@ export const Technicians: React.FC = () => {
       return;
     }
     setEditingTech(null);
+    setIsSalary(false);
     form.resetFields();
     form.setFieldsValue({
+      pay_type: "hourly",
+      include_in_scheduling: true,
+      include_in_rotation: true,
       min_hours: 0,
       max_hours: 40,
       primary_day_off: "Sunday",
       secondary_day_off: "None",
-      include_in_rotation: true,
+      role: "Technician",
     });
     setModalVisible(true);
   };
 
   const handleEdit = (record: Technician) => {
     setEditingTech(record);
-    form.setFieldsValue({
-      first_name: record.first_name,
-      last_name: record.last_name,
-      email: record.email,
-      phone: record.phone,
-      pay_rate: record.pay_rate,
-      pay_type: record.pay_type,
-      min_hours: record.min_hours,
-      max_hours: record.max_hours,
-      primary_day_off: record.primary_day_off,
-      secondary_day_off: record.secondary_day_off,
-      include_in_rotation: record.include_in_rotation !== false,
-    });
+    setIsSalary(record.is_salary);
+    form.setFieldsValue(record);
     setModalVisible(true);
   };
 
@@ -107,7 +105,6 @@ export const Technicians: React.FC = () => {
     } else {
       message.success("Technician deleted");
       loadTechnicians(currentShopId);
-      window.dispatchEvent(new Event("techniciansUpdated"));
     }
     setLoading(false);
   };
@@ -126,15 +123,18 @@ export const Technicians: React.FC = () => {
         .update({
           first_name: values.first_name,
           last_name: values.last_name,
-          email: values.email,
-          phone: values.phone || "",
+          email: values.email || null,
+          phone: values.phone || null,
+          role: values.role,
           pay_rate: parseFloat(values.pay_rate),
           pay_type: values.pay_type,
-          min_hours: values.min_hours,
-          max_hours: values.max_hours,
+          is_salary: values.is_salary || false,
+          include_in_scheduling: values.include_in_scheduling !== false,
+          min_hours: values.min_hours || 0,
+          max_hours: values.max_hours || 40,
           primary_day_off: values.primary_day_off,
           secondary_day_off: values.secondary_day_off,
-          include_in_rotation: values.include_in_rotation,
+          include_in_rotation: values.include_in_rotation !== false,
         })
         .eq("id", editingTech.id)
         .eq("shop_id", currentShopId);
@@ -147,19 +147,21 @@ export const Technicians: React.FC = () => {
         setModalVisible(false);
         form.resetFields();
         loadTechnicians(currentShopId);
-        window.dispatchEvent(new Event("techniciansUpdated"));
       }
     } else {
       const { error } = await supabaseClient.from("technicians").insert({
         shop_id: currentShopId,
         first_name: values.first_name,
         last_name: values.last_name,
-        email: values.email,
-        phone: values.phone || "",
+        email: values.email || null,
+        phone: values.phone || null,
+        role: values.role,
         pay_rate: parseFloat(values.pay_rate),
         pay_type: values.pay_type,
-        min_hours: values.min_hours,
-        max_hours: values.max_hours,
+        is_salary: values.is_salary || false,
+        include_in_scheduling: values.include_in_scheduling !== false,
+        min_hours: values.min_hours || 0,
+        max_hours: values.max_hours || 40,
         primary_day_off: values.primary_day_off,
         secondary_day_off: values.secondary_day_off,
         include_in_rotation: values.include_in_rotation !== false,
@@ -173,40 +175,26 @@ export const Technicians: React.FC = () => {
         setModalVisible(false);
         form.resetFields();
         loadTechnicians(currentShopId);
-        window.dispatchEvent(new Event("techniciansUpdated"));
       }
     }
     setLoading(false);
   };
 
   const columns = [
-    { title: "Name", key: "name", render: (_: any, record: Technician) => `${record.first_name} ${record.last_name}` },
-    { title: "Email", dataIndex: "email", key: "email" },
-    { title: "Phone", dataIndex: "phone", key: "phone" },
-    { title: "Pay Rate", dataIndex: "pay_rate", key: "pay_rate", render: (rate: number) => `$${rate}` },
-    { title: "Pay Type", dataIndex: "pay_type", key: "pay_type" },
-    { title: "Min Hours", dataIndex: "min_hours", key: "min_hours" },
-    { title: "Max Hours", dataIndex: "max_hours", key: "max_hours" },
-    { title: "Primary Day Off", dataIndex: "primary_day_off", key: "primary_day_off" },
-    { title: "Secondary Day Off", dataIndex: "secondary_day_off", key: "secondary_day_off" },
-    {
-      title: (
-        <span>
-          Include in Rotation
-          <Tooltip title="When enabled, this technician will be included in rotational scheduling">
-            <QuestionCircleOutlined style={{ marginLeft: 8, color: "#9CA3AF" }} />
-          </Tooltip>
-        </span>
-      ),
-      dataIndex: "include_in_rotation",
-      key: "include_in_rotation",
-      render: (val: boolean) => (
-        <Tag color={val !== false ? "green" : "default"}>{val !== false ? "Yes" : "No"}</Tag>
-      ),
-    },
+    { title: "Name", key: "name", render: (_: any, record: Technician) => `${record.first_name} ${record.last_name}`, width: 120 },
+    { title: "Role", dataIndex: "role", key: "role", width: 120 },
+    { title: "Email", dataIndex: "email", key: "email", width: 160 },
+    { title: "Phone", dataIndex: "phone", key: "phone", width: 120 },
+    { title: "Pay Rate", dataIndex: "pay_rate", key: "pay_rate", render: (rate: number, record: Technician) => record.is_salary ? `$${rate}/wk` : `$${rate}/hr`, width: 100 },
+    { title: "Pay Type", dataIndex: "pay_type", key: "pay_type", width: 100 },
+    { title: "Min Hrs", dataIndex: "min_hours", key: "min_hours", width: 70 },
+    { title: "Max Hrs", dataIndex: "max_hours", key: "max_hours", width: 70 },
+    { title: "Primary Off", dataIndex: "primary_day_off", key: "primary_day_off", width: 100 },
+    { title: "In Schedule", dataIndex: "include_in_scheduling", key: "include_in_scheduling", render: (val: boolean) => val ? "Yes" : "No", width: 90 },
     {
       title: "Actions",
       key: "actions",
+      width: 100,
       render: (_: any, record: Technician) => (
         <Space>
           <Button type="link" icon={<EditOutlined />} onClick={() => handleEdit(record)} />
@@ -239,9 +227,9 @@ export const Technicians: React.FC = () => {
         <Table
           dataSource={technicians}
           columns={columns}
-          loading={loading}
           rowKey="id"
           style={{ background: "transparent" }}
+          loading={loading}
           scroll={{ x: 1200 }}
         />
       </Card>
@@ -251,8 +239,8 @@ export const Technicians: React.FC = () => {
         open={modalVisible}
         onCancel={() => setModalVisible(false)}
         footer={null}
-        width={600}
-        destroyOnHidden
+        width={700}
+        destroyOnClose
       >
         <Form
           form={form}
@@ -260,11 +248,14 @@ export const Technicians: React.FC = () => {
           onFinish={handleSubmit}
           initialValues={{
             pay_type: "hourly",
+            include_in_scheduling: true,
+            include_in_rotation: true,
             min_hours: 0,
             max_hours: 40,
             primary_day_off: "Sunday",
             secondary_day_off: "None",
-            include_in_rotation: true,
+            role: "Technician",
+            is_salary: false,
           }}
         >
           <Row gutter={16}>
@@ -280,25 +271,35 @@ export const Technicians: React.FC = () => {
             </Col>
           </Row>
 
-          <Form.Item name="email" label="Email" rules={[{ required: true, type: "email" }]}>
-            <Input />
-          </Form.Item>
-
-          <Form.Item name="phone" label="Phone">
-            <Input />
-          </Form.Item>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="email" label="Email">
+                <Input type="email" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="phone" label="Phone">
+                <Input />
+              </Form.Item>
+            </Col>
+          </Row>
 
           <Row gutter={16}>
             <Col span={12}>
-              <Form.Item name="pay_rate" label="Pay Rate" rules={[{ required: true }]}>
-                <Input type="number" step="0.01" prefix="$" />
+              <Form.Item name="role" label="Role" rules={[{ required: true }]}>
+                <Select>
+                  {ROLES.map(role => (
+                    <Option key={role} value={role}>{role}</Option>
+                  ))}
+                </Select>
               </Form.Item>
             </Col>
             <Col span={12}>
               <Form.Item name="pay_type" label="Pay Type" rules={[{ required: true }]}>
-                <Select>
+                <Select onChange={(val) => setIsSalary(val === "salary")}>
                   <Option value="hourly">Hourly</Option>
-                  <Option value="flat">Flat Rate</Option>
+                  <Option value="salary">Salary (weekly fixed)</Option>
+                  <Option value="flat">Flat Rate (per job)</Option>
                   <Option value="flag">Flag Hours</Option>
                 </Select>
               </Form.Item>
@@ -307,13 +308,26 @@ export const Technicians: React.FC = () => {
 
           <Row gutter={16}>
             <Col span={12}>
-              <Form.Item name="min_hours" label="Min Hours / Week" tooltip="Minimum weekly hours to schedule">
-                <Input type="number" min={0} max={168} />
+              <Form.Item name="pay_rate" label={isSalary ? "Weekly Salary ($)" : "Pay Rate ($)"} rules={[{ required: true }]}>
+                <Input type="number" step="0.01" prefix="$" />
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="max_hours" label="Max Hours / Week" tooltip="Maximum weekly hours (hard limit)">
-                <Input type="number" min={0} max={168} />
+              <Form.Item name="is_salary" hidden>
+                <Input />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="min_hours" label="Min Hours / Week">
+                <InputNumber min={0} max={168} style={{ width: "100%" }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="max_hours" label="Max Hours / Week">
+                <InputNumber min={0} max={168} style={{ width: "100%" }} />
               </Form.Item>
             </Col>
           </Row>
@@ -339,9 +353,18 @@ export const Technicians: React.FC = () => {
             </Col>
           </Row>
 
-          <Form.Item name="include_in_rotation" label="Include in Rotational Scheduling" valuePropName="checked">
-            <Switch checkedChildren="Yes" unCheckedChildren="No" />
-          </Form.Item>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="include_in_scheduling" label="Include in Scheduling" valuePropName="checked">
+                <Switch checkedChildren="Yes" unCheckedChildren="No" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="include_in_rotation" label="Include in Rotational Scheduling" valuePropName="checked">
+                <Switch checkedChildren="Yes" unCheckedChildren="No" />
+              </Form.Item>
+            </Col>
+          </Row>
 
           <Form.Item>
             <Space>
