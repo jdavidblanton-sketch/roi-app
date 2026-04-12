@@ -66,7 +66,6 @@ type ViewType = "list" | "calendar";
 
 const daysOfWeek = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 const dayLabels = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 const getWeekDates = (startDate: Dayjs) => {
   return daysOfWeek.map((day, index) => {
@@ -184,7 +183,7 @@ const generateStaggeredShifts = (
   holidays: Holiday[],
   autoRules: any,
   lunchMinutes: number,
-  rotationPattern: number,
+  rotationDays: number,
   currentOffset: number
 ): Record<string, Record<string, string>> => {
   const schedule: Record<string, Record<string, string>> = {};
@@ -281,14 +280,12 @@ export const Schedule: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [autoMode, setAutoMode] = useState(false);
   const [currentShopId, setCurrentShopId] = useState<string | null>(null);
-  const [templateModalVisible, setTemplateModalVisible] = useState(false);
   const [templateName, setTemplateName] = useState("");
   const [saveTemplateModalVisible, setSaveTemplateModalVisible] = useState(false);
   const [loadTemplateModalVisible, setLoadTemplateModalVisible] = useState(false);
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
   const [tempShiftHours, setTempShiftHours] = useState<number>(8.5);
   const [tempLunchMinutes, setTempLunchMinutes] = useState<number>(30);
-  const [rotationModalVisible, setRotationModalVisible] = useState(false);
 
   let dates: any[] = [];
   let weeks: any[][] = [];
