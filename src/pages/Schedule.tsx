@@ -7,7 +7,6 @@ import dayjs, { Dayjs } from "dayjs";
 
 const { Option } = Select;
 const { Text } = Typography;
-const { RangePicker } = DatePicker;
 
 interface Technician {
   id: string;
@@ -183,8 +182,7 @@ const generateStaggeredShifts = (
   holidays: Holiday[],
   autoRules: any,
   lunchMinutes: number,
-  rotationDays: number,
-  currentOffset: number
+  rotationPattern: number
 ): Record<string, Record<string, string>> => {
   const schedule: Record<string, Record<string, string>> = {};
   
@@ -203,9 +201,11 @@ const generateStaggeredShifts = (
   const openDaysCount = Object.values(workWeek).filter(v => v === true).length;
   const respectDayOff = autoRules.respect_day_off && openDaysCount > 5;
   
-  let rotationIndex = currentOffset;
+  // Use rotation pattern to determine shift distribution
+  let rotationIndex = 0;
   
-  for (const day of dates) {
+  for (let dayIndex = 0; dayIndex < dates.length; dayIndex++) {
+    const day = dates[dayIndex];
     const hours = getDayPaidHours(day, operationalHours, workWeek, holidays, lunchMinutes);
     const isOpen = hours > 0;
     
@@ -245,8 +245,12 @@ const generateStaggeredShifts = (
     availableTechs.sort((a, b) => weeklyHours[a.id] - weeklyHours[b.id]);
     
     const toAssign = Math.min(maxTechs, availableTechs.length);
+    
+    // Apply rotation pattern - shift the starting index based on day and pattern
+    const patternOffset = rotationPattern > 0 ? Math.floor(dayIndex / rotationPattern) % availableTechs.length : 0;
+    
     for (let i = 0; i < toAssign; i++) {
-      const techIndex = (rotationIndex + i) % availableTechs.length;
+      const techIndex = (rotationIndex + i + patternOffset) % availableTechs.length;
       const tech = availableTechs[techIndex];
       schedule[tech.id][day.date] = "work";
       weeklyHours[tech.id] += hours;
@@ -427,7 +431,7 @@ export const Schedule: React.FC = () => {
     
     const newSchedule = generateStaggeredShifts(
       techsToSchedule, dates, shopSettings.operational_hours, shopSettings.work_week, 
-      holidays, autoRules, lunchMinutes, rotationDays, 0
+      holidays, autoRules, lunchMinutes, rotationDays
     );
     
     setSchedule(newSchedule);
@@ -643,7 +647,7 @@ export const Schedule: React.FC = () => {
               size="small"
             >
               {shiftOptions.map(opt => (
-                <option key={opt.value} value={opt.value}>{opt.display}</option>
+                <Option key={opt.value} value={opt.value}>{opt.display}</Option>
               ))}
             </Select>
           );
@@ -711,7 +715,7 @@ export const Schedule: React.FC = () => {
                             style={{ width: "80px" }}
                             size="small"
                           >
-                            {shiftOptions.map(opt => (<option key={opt.value} value={opt.value}>{opt.display}</option>))}
+                            {shiftOptions.map(opt => (<Option key={opt.value} value={opt.value}>{opt.display}</Option>))}
                           </Select>
                         )}
                       </td>
@@ -767,7 +771,7 @@ export const Schedule: React.FC = () => {
                                 style={{ width: "80px" }}
                                 size="small"
                               >
-                                {shiftOptions.map(opt => (<option key={opt.value} value={opt.value}>{opt.display}</option>))}
+                                {shiftOptions.map(opt => (<Option key={opt.value} value={opt.value}>{opt.display}</Option>))}
                               </Select>
                             )}
                           </td>
