@@ -62,18 +62,71 @@ export const ShopSelector: React.FC = () => {
     }
     
     setLoading(true);
-    const { error } = await supabaseClient.from("shops").insert({
-      name: newShopName,
-    });
+    
+    // Create the shop
+    const { data: shopData, error: shopError } = await supabaseClient
+      .from("shops")
+      .insert({ name: newShopName })
+      .select()
+      .single();
 
-    if (error) {
+    if (shopError) {
       message.error("Failed to create shop");
-      console.error(error);
-    } else {
-      message.success(`Shop "${newShopName}" created`);
-      setNewShopName("");
-      loadShops();
+      console.error(shopError);
+      setLoading(false);
+      return;
     }
+
+    // Create default shop settings for the new shop
+    const defaultWorkWeek = {
+      monday: true,
+      tuesday: true,
+      wednesday: true,
+      thursday: true,
+      friday: true,
+      saturday: false,
+      sunday: false,
+    };
+
+    const defaultOperationalHours = {
+      monday: { open: "07:30", close: "18:00" },
+      tuesday: { open: "07:30", close: "18:00" },
+      wednesday: { open: "07:30", close: "18:00" },
+      thursday: { open: "07:30", close: "18:00" },
+      friday: { open: "07:30", close: "18:00" },
+      saturday: { open: "08:00", close: "16:00" },
+      sunday: { open: null, close: null },
+    };
+
+    const defaultAutoRules = {
+      min_techs_per_shift: 1,
+      max_techs_per_shift: 3,
+      target_shift_hours: 8.5,
+      lunch_minutes: 30,
+      respect_day_off: true,
+      respect_hours_limits: true,
+    };
+
+    const { error: settingsError } = await supabaseClient
+      .from("shop_settings")
+      .insert({
+        shop_id: shopData.id,
+        work_week: defaultWorkWeek,
+        operational_hours: defaultOperationalHours,
+        holidays: [],
+        auto_schedule_rules: defaultAutoRules,
+        advanced_settings: { enable: false, day_overrides: [], shift_type_limits: {} },
+      });
+
+    if (settingsError) {
+      console.error("Error creating default settings:", settingsError);
+      message.warning("Shop created but default settings could not be saved");
+    } else {
+      message.success(`Shop "${newShopName}" created with default settings`);
+    }
+    
+    setNewShopName("");
+    loadShops();
     setLoading(false);
   };
 
@@ -97,7 +150,9 @@ export const ShopSelector: React.FC = () => {
         alignItems: "center",
         minHeight: "100vh",
         padding: "24px",
-        background: "transparent",
+        backgroundImage: "url('/images/roi_bg_v1.png')",
+        backgroundSize: "cover",
+        backgroundPosition: "center",
       }}
     >
       <Card
