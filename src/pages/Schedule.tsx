@@ -189,7 +189,6 @@ const generateStaggeredShifts = (
   workWeek: WorkWeek,
   holidays: Holiday[],
   autoRules: any,
-  lunchMinutes: number,
   rotationPattern: number
 ): Record<string, Record<string, string>> => {
   const schedule: Record<string, Record<string, string>> = {};
@@ -490,7 +489,6 @@ export const Schedule: React.FC = () => {
     }
     
     const autoRules = shopSettings.auto_schedule_rules;
-    const lunchMinutes = autoRules.lunch_minutes || 30;
     
     let techsToSchedule = technicians.filter(t => t.include_in_scheduling !== false);
     
@@ -498,7 +496,7 @@ export const Schedule: React.FC = () => {
     
     const newSchedule = generateStaggeredShifts(
       techsToSchedule, dates, shopSettings.operational_hours, shopSettings.work_week, 
-      holidays, autoRules, lunchMinutes, rotationDays
+      holidays, autoRules, rotationDays
     );
     
     setSchedule(newSchedule);
@@ -511,7 +509,7 @@ export const Schedule: React.FC = () => {
       for (const day of dates) {
         const shiftValue = newSchedule[tech.id]?.[day.date] || "off";
         if (shiftValue !== "off") {
-          total += getDayPaidHours(day, shopSettings.operational_hours, shopSettings.work_week, holidays, lunchMinutes);
+          total += getDayPaidHours(day, shopSettings.operational_hours, shopSettings.work_week, holidays, shopSettings.auto_schedule_rules.lunch_minutes || 30);
         }
       }
       tempHours[tech.id] = total;
@@ -703,7 +701,6 @@ export const Schedule: React.FC = () => {
             return <Tag color="red" style={{ width: "100%", textAlign: "center" }}>CLOSED</Tag>;
           }
           
-          // Show actual time range if available
           const displayValue = currentShiftValue !== "off" ? currentShiftValue : "OFF";
           
           return (
