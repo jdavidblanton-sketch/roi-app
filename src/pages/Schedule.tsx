@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Table, Button, Select, Card, message, Switch, Space, Radio, Modal, Checkbox, Tag, Tooltip, Alert, InputNumber, Divider, Statistic, Row, Col, DatePicker, Tabs, List, Popconfirm, Input } from "antd";
+import { Table, Button, Select, Card, message, Switch, Space, Radio, Modal, Checkbox, Tag, Tooltip, Alert, InputNumber, Divider, Statistic, Row, Col, DatePicker, List, Popconfirm, Input } from "antd";
 import { SaveOutlined, ThunderboltOutlined, LeftOutlined, RightOutlined, CopyOutlined, WarningOutlined, DollarOutlined, ClockCircleOutlined, SettingOutlined, QuestionCircleOutlined, CalendarOutlined, UnorderedListOutlined, FolderOpenOutlined, DeleteOutlined } from "@ant-design/icons";
 import { supabaseClient } from "../utils";
 import { Typography } from "antd";
@@ -316,7 +316,6 @@ export const Schedule: React.FC = () => {
     }
   }, [duration]);
 
-  // Only load schedule from database on initial load or when dates change
   useEffect(() => {
     if (currentShopId && settingsLoaded && technicians.length > 0 && !autoMode) {
       loadScheduleFromDatabase();
@@ -362,7 +361,6 @@ export const Schedule: React.FC = () => {
       
       setSettingsLoaded(true);
       
-      // Load schedule from database
       if (techData && techData.length > 0) {
         await loadScheduleFromDatabase();
       }
@@ -440,10 +438,8 @@ export const Schedule: React.FC = () => {
       holidays, autoRules, lunchMinutes, rotationDays
     );
     
-    // Directly set the schedule without loading from database
     setSchedule(newSchedule);
     
-    // Calculate hours and pay for the generated schedule
     let tempHours: Record<string, number> = {};
     let tempPay: Record<string, number> = {};
     let tempTotal = 0;
@@ -613,15 +609,6 @@ export const Schedule: React.FC = () => {
     return { isOpen: hours > 0, timeDisplay, hours };
   };
 
-  const getShiftOptions = () => {
-    return [
-      { value: "off", label: "OFF", display: "OFF" },
-      { value: "work", label: "WORK", display: "WORK" },
-    ];
-  };
-
-  const shiftOptions = getShiftOptions();
-
   const listColumns = [
     { title: "Tech", dataIndex: "name", key: "name", fixed: "left" as const, width: 150 },
     ...dates.map((day) => {
@@ -636,7 +623,7 @@ export const Schedule: React.FC = () => {
           </div>
         ),
         key: day.date,
-        width: 90,
+        width: 110,
         render: (_: any, record: any) => {
           const currentShiftValue = schedule[record.id]?.[day.date] || "off";
           const isOpen = dayInfo.isOpen;
@@ -645,16 +632,20 @@ export const Schedule: React.FC = () => {
             return <Tag color="red" style={{ width: "100%", textAlign: "center" }}>CLOSED</Tag>;
           }
           
+          // Show actual time range if available, otherwise show the day's hours
+          const displayValue = currentShiftValue !== "off" && currentShiftValue !== "work" 
+            ? currentShiftValue 
+            : dayInfo.timeDisplay;
+          
           return (
             <Select
-              value={currentShiftValue}
+              value={currentShiftValue === "off" ? "off" : "work"}
               onChange={(v) => handleShiftChange(record.id, day.date, v)}
               style={{ width: "100%" }}
               size="small"
             >
-              {shiftOptions.map(opt => (
-                <Option key={opt.value} value={opt.value}>{opt.display}</Option>
-              ))}
+              <Option value="off">OFF</Option>
+              <Option value="work">{displayValue}</Option>
             </Select>
           );
         },
@@ -710,18 +701,22 @@ export const Schedule: React.FC = () => {
                   {weekDates.map((day) => {
                     const dayInfo = getDayDisplayInfo(day);
                     const shiftValue = schedule[tech.id]?.[day.date] || "off";
+                    const displayValue = shiftValue !== "off" && shiftValue !== "work" 
+                      ? shiftValue 
+                      : dayInfo.timeDisplay;
                     return (
                       <td key={day.date} style={{ padding: "8px", textAlign: "center", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: !dayInfo.isOpen ? "rgba(244,67,54,0.1)" : "transparent" }}>
                         {!dayInfo.isOpen ? (
                           <Tag color="red">CLOSED</Tag>
                         ) : (
                           <Select
-                            value={shiftValue}
+                            value={shiftValue === "off" ? "off" : "work"}
                             onChange={(v) => handleShiftChange(tech.id, day.date, v)}
-                            style={{ width: "80px" }}
+                            style={{ width: "100px" }}
                             size="small"
                           >
-                            {shiftOptions.map(opt => (<Option key={opt.value} value={opt.value}>{opt.display}</Option>))}
+                            <Option value="off">OFF</Option>
+                            <Option value="work">{displayValue}</Option>
                           </Select>
                         )}
                       </td>
@@ -766,18 +761,22 @@ export const Schedule: React.FC = () => {
                       {week.map((day) => {
                         const dayInfo = getDayDisplayInfo(day);
                         const shiftValue = schedule[tech.id]?.[day.date] || "off";
+                        const displayValue = shiftValue !== "off" && shiftValue !== "work" 
+                          ? shiftValue 
+                          : dayInfo.timeDisplay;
                         return (
                           <td key={day.date} style={{ padding: "8px", textAlign: "center", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: !dayInfo.isOpen ? "rgba(244,67,54,0.1)" : "transparent" }}>
                             {!dayInfo.isOpen ? (
                               <Tag color="red">CLOSED</Tag>
                             ) : (
                               <Select
-                                value={shiftValue}
+                                value={shiftValue === "off" ? "off" : "work"}
                                 onChange={(v) => handleShiftChange(tech.id, day.date, v)}
-                                style={{ width: "80px" }}
+                                style={{ width: "100px" }}
                                 size="small"
                               >
-                                {shiftOptions.map(opt => (<Option key={opt.value} value={opt.value}>{opt.display}</Option>))}
+                                <Option value="off">OFF</Option>
+                                <Option value="work">{displayValue}</Option>
                               </Select>
                             )}
                           </td>
@@ -896,7 +895,7 @@ export const Schedule: React.FC = () => {
         </Row>
         
         {viewType === "list" ? (
-          <Table columns={listColumns} dataSource={listDataSource} loading={loading} pagination={false} size="small" scroll={{ x: dates.length * 90 }} />
+          <Table columns={listColumns} dataSource={listDataSource} loading={loading} pagination={false} size="small" scroll={{ x: dates.length * 110 }} />
         ) : (
           renderCalendarView()
         )}
