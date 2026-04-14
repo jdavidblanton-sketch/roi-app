@@ -201,7 +201,6 @@ const generateStaggeredShifts = (
   const openDaysCount = Object.values(workWeek).filter(v => v === true).length;
   const respectDayOff = autoRules.respect_day_off && openDaysCount > 5;
   
-  // Use rotation pattern to determine shift distribution
   let rotationIndex = 0;
   
   for (let dayIndex = 0; dayIndex < dates.length; dayIndex++) {
@@ -246,7 +245,6 @@ const generateStaggeredShifts = (
     
     const toAssign = Math.min(maxTechs, availableTechs.length);
     
-    // Apply rotation pattern - shift the starting index based on day and pattern
     const patternOffset = rotationPattern > 0 ? Math.floor(dayIndex / rotationPattern) % availableTechs.length : 0;
     
     for (let i = 0; i < toAssign; i++) {
@@ -318,11 +316,12 @@ export const Schedule: React.FC = () => {
     }
   }, [duration]);
 
+  // Only load schedule from database on initial load or when dates change
   useEffect(() => {
-    if (currentShopId && settingsLoaded && technicians.length > 0) {
-      loadSchedule(dates.map(d => d.date));
+    if (currentShopId && settingsLoaded && technicians.length > 0 && !autoMode) {
+      loadScheduleFromDatabase();
     }
-  }, [dates, settingsLoaded, duration, startDate]);
+  }, [dates, settingsLoaded, currentShopId]);
 
   const loadAllData = async (shopId: string) => {
     setLoading(true);
@@ -362,7 +361,11 @@ export const Schedule: React.FC = () => {
       }
       
       setSettingsLoaded(true);
-      await loadSchedule(dates.map(d => d.date));
+      
+      // Load schedule from database
+      if (techData && techData.length > 0) {
+        await loadScheduleFromDatabase();
+      }
     } catch (error) {
       console.error("Error loading data:", error);
       message.error("Failed to load schedule");
@@ -371,13 +374,16 @@ export const Schedule: React.FC = () => {
     }
   };
 
-  const loadSchedule = async (dateStrings: string[]) => {
+  const loadScheduleFromDatabase = async () => {
     if (!currentShopId) return;
+    
+    const dateStrings = dates.map(d => d.date);
     const { data: scheduleData, error: scheduleError } = await supabaseClient
       .from("schedule_entries")
       .select("*")
       .eq("shop_id", currentShopId)
       .in("date", dateStrings);
+    
     if (scheduleError) {
       console.error("Error loading schedule:", scheduleError);
       return;
@@ -434,8 +440,10 @@ export const Schedule: React.FC = () => {
       holidays, autoRules, lunchMinutes, rotationDays
     );
     
+    // Directly set the schedule without loading from database
     setSchedule(newSchedule);
     
+    // Calculate hours and pay for the generated schedule
     let tempHours: Record<string, number> = {};
     let tempPay: Record<string, number> = {};
     let tempTotal = 0;
@@ -533,9 +541,7 @@ export const Schedule: React.FC = () => {
     }
   };
 
-  const handleLoadTemplate = async (template: ScheduleTemplate) => {
-    if (!currentShopId) return;
-    
+  const handleLoadTemplate = (template: ScheduleTemplate) => {
     setSchedule(template.schedule_data);
     
     if (shopSettings) {
