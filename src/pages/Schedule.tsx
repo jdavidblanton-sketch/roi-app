@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { Table, Button, Select, Card, message, Switch, Space, Radio, Modal, Checkbox, Tag, Tooltip, Alert, InputNumber, Divider, Statistic, Row, Col, DatePicker, List, Popconfirm, Input } from "antd";
-import { SaveOutlined, ThunderboltOutlined, LeftOutlined, RightOutlined, CopyOutlined, WarningOutlined, DollarOutlined, ClockCircleOutlined, SettingOutlined, QuestionCircleOutlined, CalendarOutlined, UnorderedListOutlined, FolderOpenOutlined, DeleteOutlined } from "@ant-design/icons";
+import { Table, Button, Select, Card, message, Switch, Space, Radio, Modal, Tag, Tooltip, InputNumber, Divider, Statistic, Row, Col, DatePicker, List, Popconfirm, Input } from "antd";
+import { SaveOutlined, ThunderboltOutlined, DollarOutlined, ClockCircleOutlined, SettingOutlined, CalendarOutlined, UnorderedListOutlined, FolderOpenOutlined, DeleteOutlined } from "@ant-design/icons";
 import { supabaseClient } from "../utils";
 import { Typography } from "antd";
 import dayjs, { Dayjs } from "dayjs";
@@ -117,13 +117,12 @@ const getMonthDates = (startDate: Dayjs) => {
     const weekDates = [];
     for (let day = 0; day < 7; day++) {
       const date = calendarStart.add(week * 7 + day, "day");
-      const isCurrentMonth = date.month() === month;
       weekDates.push({
         name: dayLabels[day],
         dayKey: daysOfWeek[day],
         date: date.format("YYYY-MM-DD"),
         display: `${dayLabels[day].slice(0,3)} ${date.format("MM/DD")}`,
-        isCurrentMonth,
+        isCurrentMonth: date.month() === month,
       });
     }
     weeks.push(weekDates);
@@ -137,9 +136,11 @@ const getActualShiftHours = (shiftDisplay: string, lunchMinutes: number): number
   if (!startStr || !endStr) return 0;
   
   const parseTime = (timeStr: string): number => {
-    let hour = parseInt(timeStr.match(/\d+/)?.[0] || "0");
-    const minute = parseInt(timeStr.match(/:(\d+)/)?.[1] || "0");
-    const isPm = timeStr.includes("pm");
+    const match = timeStr.match(/(\d+):(\d+)(am|pm)/);
+    if (!match) return 0;
+    let hour = parseInt(match[1]);
+    const minute = parseInt(match[2]);
+    const isPm = match[3] === "pm";
     if (isPm && hour !== 12) hour += 12;
     if (!isPm && hour === 12) hour = 0;
     return hour + minute / 60;
@@ -228,13 +229,13 @@ const generateStaggeredShifts = (
     }
   }
   
-  const respectDayOff = autoRules.respect_day_off === true;
-  const respectHoursLimits = autoRules.respect_hours_limits === true;
-  const targetShiftHours = autoRules.target_shift_hours || 8;
-  const lunchMinutes = autoRules.lunch_minutes || 30;
+  const respectDayOff = autoRules?.respect_day_off === true;
+  const respectHoursLimits = autoRules?.respect_hours_limits === true;
+  const targetShiftHours = autoRules?.target_shift_hours || 8;
+  const lunchMinutes = autoRules?.lunch_minutes || 30;
   const paidShiftHours = targetShiftHours - (lunchMinutes / 60);
-  const minTechsPerShift = autoRules.min_techs_per_shift || 1;
-  const maxTechsPerShift = autoRules.max_techs_per_shift || 3;
+  const minTechsPerShift = autoRules?.min_techs_per_shift || 1;
+  const maxTechsPerShift = autoRules?.max_techs_per_shift || 3;
   
   // Sort by current hours (lowest first) for fair distribution
   const sortByHours = (techs: Technician[]) => {
@@ -302,7 +303,8 @@ const generateStaggeredShifts = (
       if (rotationOffset > 0) {
         const rotated = [...eligibleTechs];
         for (let i = 0; i < rotationOffset; i++) {
-          rotated.push(rotated.shift()!);
+          const shifted = rotated.shift();
+          if (shifted) rotated.push(shifted);
         }
         eligibleTechs = rotated;
       }
@@ -315,14 +317,11 @@ const generateStaggeredShifts = (
     // Calculate staggered shift start times
     const shiftStartTimes: number[] = [];
     if (techsToAssign === 1) {
-      // Single tech: start at opening time
       shiftStartTimes.push(openHour);
     } else {
-      // Stagger shifts across the open hours
       const staggerStep = (totalOpenHours - targetShiftHours) / (techsToAssign - 1);
       for (let i = 0; i < techsToAssign; i++) {
         let startTime = openHour + (staggerStep * i);
-        // Ensure shift fits within business hours
         if (startTime + targetShiftHours > closeHour) {
           startTime = closeHour - targetShiftHours;
         }
@@ -341,7 +340,6 @@ const generateStaggeredShifts = (
       const shiftDisplay = `${startTimeStr}-${endTimeStr}`;
       
       schedule[tech.id][day.date] = shiftDisplay;
-      // Add PAID hours (after lunch)
       weeklyHours[tech.id] += paidShiftHours;
     }
   }
@@ -354,30 +352,21 @@ const generateStaggeredShifts = (
       
       let neededHours = tech.min_hours - weeklyHours[tech.id];
       
-      // Find available days to add shifts
       for (let dayIndex = 0; dayIndex < dates.length && neededHours > 0; dayIndex++) {
         const day = dates[dayIndex];
         const dayName = day.name;
         const dayKey = day.dayKey as keyof OperationalHours;
         const dayHours = operationalHours[dayKey];
         
-        // Skip if already scheduled this day
         if (schedule[tech.id][day.date] !== "off") continue;
-        
-        // Check if shop is open
         if (!dayHours?.open || !dayHours?.close) continue;
-        
-        // Check work week
         if (!workWeek[dayKey as keyof WorkWeek]) continue;
         
-        // Check holiday
         const holiday = holidays.find(h => h.date === day.date);
         if (holiday?.is_closed) continue;
         
-        // Check day off
         if (respectDayOff && (tech.primary_day_off === dayName || tech.secondary_day_off === dayName)) continue;
         
-        // Check max hours
         if (tech.max_hours > 0 && weeklyHours[tech.id] + paidShiftHours > tech.max_hours) {
           continue;
         }
@@ -392,7 +381,6 @@ const generateStaggeredShifts = (
         const openHour = parseTimeToDecimal(openTime);
         const closeHour = parseTimeToDecimal(closeTime);
         
-        // Add a shift
         let startHour = openHour;
         let endHour = startHour + targetShiftHours;
         if (endHour > closeHour) {
@@ -411,7 +399,7 @@ const generateStaggeredShifts = (
     }
   }
   
-  // THIRD PASS: Ensure no tech exceeds max hours (trim excess)
+  // THIRD PASS: Ensure no tech exceeds max hours
   if (respectHoursLimits) {
     for (const tech of technicians) {
       if (tech.max_hours <= 0) continue;
@@ -419,7 +407,6 @@ const generateStaggeredShifts = (
       
       let excessHours = weeklyHours[tech.id] - tech.max_hours;
       
-      // Remove shifts from days starting from the end
       for (let dayIndex = dates.length - 1; dayIndex >= 0 && excessHours > 0; dayIndex--) {
         const day = dates[dayIndex];
         
@@ -795,7 +782,7 @@ export const Schedule: React.FC = () => {
       const dayInfo = getDayDisplayInfo(day);
       return {
         title: (
-          <div>
+          <div key={day.date}>
             <div>{day.display}</div>
             <div style={{ fontSize: "10px", color: dayInfo.isOpen ? "#4CAF50" : "#F44336" }}>
               {dayInfo.timeDisplay}
@@ -913,7 +900,7 @@ export const Schedule: React.FC = () => {
                   <td style={{ padding: "12px", textAlign: "center", border: "1px solid rgba(255,255,255,0.1)" }}>
                     ${(weeklyPay[tech.id] || 0).toFixed(2)}
                   </td>
-                </table>
+                </tr>
               ))}
             </tbody>
           </table>
@@ -962,7 +949,7 @@ export const Schedule: React.FC = () => {
                           </td>
                         );
                       })}
-                    </td>
+                    </tr>
                   ))}
                 </tbody>
               </table>
@@ -1108,6 +1095,7 @@ export const Schedule: React.FC = () => {
           dataSource={templates}
           renderItem={(template) => (
             <List.Item
+              key={template.id}
               actions={[
                 <Button type="link" onClick={() => handleLoadTemplate(template)}>Load</Button>,
                 <Popconfirm title="Delete this template?" onConfirm={() => handleDeleteTemplate(template.id)}>
