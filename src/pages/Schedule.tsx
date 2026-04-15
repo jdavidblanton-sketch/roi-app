@@ -192,68 +192,76 @@ const generateStaggeredShifts = (
   rotationPattern: number
 ): Record<string, Record<string, string>> => {
   const schedule: Record<string, Record<string, string>> = {};
+  const weeklyHours: Record<string, number> = {};
   
   // Initialize all OFF
   for (const tech of technicians) {
     schedule[tech.id] = {};
+    weeklyHours[tech.id] = 0;
     for (const day of dates) {
       schedule[tech.id][day.date] = "off";
     }
   }
   
-  let weeklyHours: Record<string, number> = {};
-  for (const tech of technicians) {
-    weeklyHours[tech.id] = 0;
-  }
+  const respectDayOff = autoRules.respect_day_off === true;
+  const respectHoursLimits = autoRules.respect_hours_limits === true;
+  const targetShiftHours = autoRules.target_shift_hours || 8;
+  const minTechsPerShift = autoRules.min_techs_per_shift || 1;
+  const maxTechsPerShift = autoRules.max_techs_per_shift || 3;
   
-  const openDaysCount = Object.values(workWeek).filter(v => v === true).length;
-  const respectDayOff = autoRules.respect_day_off && openDaysCount > 5;
+  // Create a copy of technicians we can modify
+  let availableTechs = [...technicians].filter(t => t.include_in_scheduling !== false);
   
-  // Track rotation index across days for fair distribution
-  let globalTechIndex = 0;
+  // Sort by current hours (lowest first) for fair distribution
+  const sortByHours = (techs: Technician[]) => {
+    return [...techs].sort((a, b) => weeklyHours[a.id] - weeklyHours[b.id]);
+  };
   
+  // For each day, determine who works
   for (let dayIndex = 0; dayIndex < dates.length; dayIndex++) {
     const day = dates[dayIndex];
-    
-    // Get shop hours for this day
+    const dayName = day.name;
     const dayKey = day.dayKey as keyof OperationalHours;
     const dayHours = operationalHours[dayKey];
     
-    if (!dayHours?.open || !dayHours?.close) {
-      continue;
-    }
+    // Check if shop is open
+    if (!dayHours?.open || !dayHours?.close) continue;
     
+    // Check if work week allows this day
+    if (!workWeek[dayKey as keyof WorkWeek]) continue;
+    
+    // Check for holiday
     const holiday = holidays.find(h => h.date === day.date);
+    if (holiday?.is_closed) continue;
+    
     let openTime = dayHours.open;
     let closeTime = dayHours.close;
-    
-    if (holiday) {
-      if (holiday.is_closed) continue;
-      if (holiday.open_time && holiday.close_time) {
-        openTime = holiday.open_time;
-        closeTime = holiday.close_time;
-      }
+    if (holiday?.open_time && holiday?.close_time) {
+      openTime = holiday.open_time;
+      closeTime = holiday.close_time;
     }
     
     const openHour = parseFloat(openTime.split(":")[0]) + parseFloat(openTime.split(":")[1]) / 60;
     const closeHour = parseFloat(closeTime.split(":")[0]) + parseFloat(closeTime.split(":")[1]) / 60;
     const totalOpenHours = closeHour - openHour;
-    const targetShiftHours = autoRules.target_shift_hours || 8.5;
     
-    // Calculate how many techs to assign based on max techs per shift setting
-    let techsToAssign = autoRules.max_techs_per_shift;
+    // Calculate how many techs we need for this day
+    let techsNeeded = Math.ceil(totalOpenHours / targetShiftHours);
+    techsNeeded = Math.max(minTechsPerShift, Math.min(maxTechsPerShift, techsNeeded));
     
-    // Get available technicians (not on day off, not at max hours)
-    let availableTechs = technicians.filter(t => t.include_in_scheduling !== false);
+    // Get eligible techs for this day
+    let eligibleTechs = [...availableTechs];
     
+    // Filter by day off
     if (respectDayOff) {
-      availableTechs = availableTechs.filter(tech => 
-        tech.primary_day_off !== day.name && tech.secondary_day_off !== day.name
+      eligibleTechs = eligibleTechs.filter(tech => 
+        tech.primary_day_off !== dayName && tech.secondary_day_off !== dayName
       );
     }
     
-    if (autoRules.respect_hours_limits) {
-      availableTechs = availableTechs.filter(tech => {
+    // Filter by max hours (if they would exceed max with one more shift)
+    if (respectHoursLimits) {
+      eligibleTechs = eligibleTechs.filter(tech => {
         if (tech.max_hours > 0 && weeklyHours[tech.id] + targetShiftHours > tech.max_hours) {
           return false;
         }
@@ -261,55 +269,47 @@ const generateStaggeredShifts = (
       });
     }
     
-    // Don't schedule more than available
-    techsToAssign = Math.min(techsToAssign, availableTechs.length);
+    // Sort by current hours (lowest first)
+    eligibleTechs = sortByHours(eligibleTechs);
     
-    // Ensure we meet minimum requirement
-    if (techsToAssign < autoRules.min_techs_per_shift) {
-      techsToAssign = Math.min(autoRules.min_techs_per_shift, availableTechs.length);
+    // Apply rotation pattern (shift the array based on day index)
+    if (rotationPattern > 0 && eligibleTechs.length > 0) {
+      const rotationOffset = Math.floor(dayIndex / rotationPattern) % eligibleTechs.length;
+      if (rotationOffset > 0) {
+        const rotated = [...eligibleTechs];
+        for (let i = 0; i < rotationOffset; i++) {
+          rotated.push(rotated.shift()!);
+        }
+        eligibleTechs = rotated;
+      }
     }
+    
+    // Assign shifts to the needed number of techs
+    const techsToAssign = Math.min(techsNeeded, eligibleTechs.length);
     
     if (techsToAssign === 0) continue;
     
-    // Calculate staggered shift start times
+    // Calculate staggered start times
     const shiftStartTimes: number[] = [];
-    
     if (techsToAssign === 1) {
-      // Single tech works the whole day, but limited to target shift hours if possible
-      let startTime = openHour;
-      let endTime = startTime + targetShiftHours;
-      if (endTime > closeHour) {
-        endTime = closeHour;
-        startTime = endTime - targetShiftHours;
-      }
-      shiftStartTimes.push(startTime);
+      // Single tech: start at opening time
+      shiftStartTimes.push(openHour);
     } else {
-      // Stagger shifts across the day
-      const interval = (totalOpenHours - targetShiftHours) / (techsToAssign - 1);
+      // Stagger shifts across the open hours
+      const staggerStep = (totalOpenHours - targetShiftHours) / (techsToAssign - 1);
       for (let i = 0; i < techsToAssign; i++) {
-        let startTime = openHour + (interval * i);
-        let endTime = startTime + targetShiftHours;
-        if (endTime > closeHour) {
-          endTime = closeHour;
-          startTime = endTime - targetShiftHours;
+        let startTime = openHour + (staggerStep * i);
+        // Ensure shift fits within business hours
+        if (startTime + targetShiftHours > closeHour) {
+          startTime = closeHour - targetShiftHours;
         }
         shiftStartTimes.push(startTime);
       }
     }
     
-    // Sort available techs by current hours (lowest first) for fair distribution
-    const sortedTechs = [...availableTechs].sort((a, b) => weeklyHours[a.id] - weeklyHours[b.id]);
-    
-    // Apply rotation pattern
-    const rotatedTechs = [...sortedTechs];
-    const rotationOffset = rotationPattern > 0 ? Math.floor(dayIndex / rotationPattern) % sortedTechs.length : 0;
-    for (let i = 0; i < rotationOffset; i++) {
-      rotatedTechs.push(rotatedTechs.shift()!);
-    }
-    
-    // Assign shifts to techs
-    for (let i = 0; i < shiftStartTimes.length && i < rotatedTechs.length; i++) {
-      const tech = rotatedTechs[i];
+    // Assign shifts
+    for (let i = 0; i < techsToAssign && i < eligibleTechs.length; i++) {
+      const tech = eligibleTechs[i];
       const startHour = shiftStartTimes[i];
       const endHour = startHour + targetShiftHours;
       
@@ -320,69 +320,89 @@ const generateStaggeredShifts = (
       schedule[tech.id][day.date] = shiftDisplay;
       weeklyHours[tech.id] += targetShiftHours;
     }
-    
-    // Update global rotation index
-    globalTechIndex += shiftStartTimes.length;
   }
   
-  // Second pass: enforce min hours (add shifts if below minimum)
-  if (autoRules.respect_hours_limits) {
+  // SECOND PASS: Ensure minimum hours for all techs
+  if (respectHoursLimits) {
     for (const tech of technicians) {
-      if (tech.min_hours > 0 && weeklyHours[tech.id] < tech.min_hours) {
-        let neededHours = tech.min_hours - weeklyHours[tech.id];
+      if (tech.min_hours <= 0) continue;
+      if (weeklyHours[tech.id] >= tech.min_hours) continue;
+      
+      let neededHours = tech.min_hours - weeklyHours[tech.id];
+      
+      // Find available days to add shifts
+      for (let dayIndex = 0; dayIndex < dates.length && neededHours > 0; dayIndex++) {
+        const day = dates[dayIndex];
+        const dayName = day.name;
+        const dayKey = day.dayKey as keyof OperationalHours;
+        const dayHours = operationalHours[dayKey];
         
-        for (let dayIndex = 0; dayIndex < dates.length && neededHours > 0; dayIndex++) {
-          const day = dates[dayIndex];
-          
-          // Skip if already assigned this day
-          if (schedule[tech.id][day.date] !== "off") continue;
-          
-          // Get shop hours for this day
-          const dayKey = day.dayKey as keyof OperationalHours;
-          const dayHours = operationalHours[dayKey];
-          
-          if (!dayHours?.open || !dayHours?.close) continue;
-          
-          const holiday = holidays.find(h => h.date === day.date);
-          let openTime = dayHours.open;
-          let closeTime = dayHours.close;
-          
-          if (holiday) {
-            if (holiday.is_closed) continue;
-            if (holiday.open_time && holiday.close_time) {
-              openTime = holiday.open_time;
-              closeTime = holiday.close_time;
-            }
-          }
-          
-          const openHour = parseFloat(openTime.split(":")[0]) + parseFloat(openTime.split(":")[1]) / 60;
-          const closeHour = parseFloat(closeTime.split(":")[0]) + parseFloat(closeTime.split(":")[1]) / 60;
-          const targetShiftHours = autoRules.target_shift_hours || 8.5;
-          
-          // Check day off
-          const isDayOff = respectDayOff && (tech.primary_day_off === day.name || tech.secondary_day_off === day.name);
-          if (isDayOff) continue;
-          
-          // Check max hours
-          if (tech.max_hours > 0 && weeklyHours[tech.id] + targetShiftHours > tech.max_hours) {
-            continue;
-          }
-          
-          // Add shift
-          let startTime = openHour;
-          let endTime = startTime + targetShiftHours;
-          if (endTime > closeHour) {
-            endTime = closeHour;
-            startTime = endTime - targetShiftHours;
-          }
-          
-          const startTimeStr = formatTime(startTime);
-          const endTimeStr = formatTime(endTime);
-          const shiftDisplay = `${startTimeStr}-${endTimeStr}`;
-          
-          schedule[tech.id][day.date] = shiftDisplay;
-          weeklyHours[tech.id] += targetShiftHours;
-          neededHours -= targetShiftHours;
+        // Skip if already scheduled this day
+        if (schedule[tech.id][day.date] !== "off") continue;
+        
+        // Check if shop is open
+        if (!dayHours?.open || !dayHours?.close) continue;
+        
+        // Check work week
+        if (!workWeek[dayKey as keyof WorkWeek]) continue;
+        
+        // Check holiday
+        const holiday = holidays.find(h => h.date === day.date);
+        if (holiday?.is_closed) continue;
+        
+        // Check day off
+        if (respectDayOff && (tech.primary_day_off === dayName || tech.secondary_day_off === dayName)) continue;
+        
+        // Check max hours
+        if (tech.max_hours > 0 && weeklyHours[tech.id] + targetShiftHours > tech.max_hours) {
+          continue;
+        }
+        
+        let openTime = dayHours.open;
+        let closeTime = dayHours.close;
+        if (holiday?.open_time && holiday?.close_time) {
+          openTime = holiday.open_time;
+          closeTime = holiday.close_time;
+        }
+        
+        const openHour = parseFloat(openTime.split(":")[0]) + parseFloat(openTime.split(":")[1]) / 60;
+        const closeHour = parseFloat(closeTime.split(":")[0]) + parseFloat(closeTime.split(":")[1]) / 60;
+        
+        // Add a shift
+        let startHour = openHour;
+        let endHour = startHour + targetShiftHours;
+        if (endHour > closeHour) {
+          endHour = closeHour;
+          startHour = endHour - targetShiftHours;
+        }
+        
+        const startTimeStr = formatTime(startHour);
+        const endTimeStr = formatTime(endHour);
+        const shiftDisplay = `${startTimeStr}-${endTimeStr}`;
+        
+        schedule[tech.id][day.date] = shiftDisplay;
+        weeklyHours[tech.id] += targetShiftHours;
+        neededHours -= targetShiftHours;
+      }
+    }
+  }
+  
+  // THIRD PASS: Ensure no tech exceeds max hours (trim excess)
+  if (respectHoursLimits) {
+    for (const tech of technicians) {
+      if (tech.max_hours <= 0) continue;
+      if (weeklyHours[tech.id] <= tech.max_hours) continue;
+      
+      let excessHours = weeklyHours[tech.id] - tech.max_hours;
+      
+      // Remove shifts from days starting from the end
+      for (let dayIndex = dates.length - 1; dayIndex >= 0 && excessHours > 0; dayIndex--) {
+        const day = dates[dayIndex];
+        
+        if (schedule[tech.id][day.date] !== "off") {
+          schedule[tech.id][day.date] = "off";
+          weeklyHours[tech.id] -= targetShiftHours;
+          excessHours -= targetShiftHours;
         }
       }
     }
@@ -557,10 +577,11 @@ export const Schedule: React.FC = () => {
       return;
     }
     
+    console.log("Auto Rules:", shopSettings.auto_schedule_rules);
+    console.log("Technicians:", technicians.map(t => ({ id: t.id, name: `${t.first_name} ${t.last_name}`, min: t.min_hours, max: t.max_hours, dayOff: t.primary_day_off })));
+    
     const autoRules = shopSettings.auto_schedule_rules;
-    
     let techsToSchedule = technicians.filter(t => t.include_in_scheduling !== false);
-    
     const rotationDays = rotationPattern === 0 ? customRotation : rotationPattern;
     
     const newSchedule = generateStaggeredShifts(
@@ -584,6 +605,7 @@ export const Schedule: React.FC = () => {
       tempHours[tech.id] = total;
       tempPay[tech.id] = calculatePay(total, tech.pay_rate, tech.pay_type);
       tempTotal += tempPay[tech.id];
+      console.log(`${tech.first_name} ${tech.last_name}: ${total.toFixed(1)} hours (min: ${tech.min_hours}, max: ${tech.max_hours})`);
     }
     setWeeklyHours(tempHours);
     setWeeklyPay(tempPay);
@@ -769,8 +791,6 @@ export const Schedule: React.FC = () => {
             return <Tag color="red" style={{ width: "100%", textAlign: "center" }}>CLOSED</Tag>;
           }
           
-          const displayValue = currentShiftValue !== "off" ? currentShiftValue : "OFF";
-          
           return (
             <Select
               value={currentShiftValue === "off" ? "off" : currentShiftValue}
@@ -789,11 +809,22 @@ export const Schedule: React.FC = () => {
         const total = weeklyHours[record.id] || 0;
         const tech = technicians.find(t => t.id === record.id);
         let color = "blue";
+        let tooltip = "";
         if (tech) {
-          if (tech.min_hours > 0 && total < tech.min_hours) color = "orange";
-          if (tech.max_hours > 0 && total > tech.max_hours) color = "red";
+          if (tech.min_hours > 0 && total < tech.min_hours) {
+            color = "orange";
+            tooltip = `Below minimum (${tech.min_hours} hrs)`;
+          }
+          if (tech.max_hours > 0 && total > tech.max_hours) {
+            color = "red";
+            tooltip = `Exceeds maximum (${tech.max_hours} hrs)`;
+          }
         }
-        return <Tag color={color}>{total.toFixed(1)}</Tag>;
+        return (
+          <Tooltip title={tooltip}>
+            <Tag color={color}>{total.toFixed(1)}</Tag>
+          </Tooltip>
+        );
       }
     },
     { title: "Pay", key: "pay", width: 80, render: (_: any, record: any) => {
@@ -835,7 +866,6 @@ export const Schedule: React.FC = () => {
                   {weekDates.map((day) => {
                     const dayInfo = getDayDisplayInfo(day);
                     const shiftValue = schedule[tech.id]?.[day.date] || "off";
-                    const displayValue = shiftValue !== "off" ? shiftValue : "OFF";
                     return (
                       <td key={day.date} style={{ padding: "8px", textAlign: "center", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: !dayInfo.isOpen ? "rgba(244,67,54,0.1)" : "transparent" }}>
                         {!dayInfo.isOpen ? (
@@ -893,7 +923,6 @@ export const Schedule: React.FC = () => {
                       {week.map((day) => {
                         const dayInfo = getDayDisplayInfo(day);
                         const shiftValue = schedule[tech.id]?.[day.date] || "off";
-                        const displayValue = shiftValue !== "off" ? shiftValue : "OFF";
                         return (
                           <td key={day.date} style={{ padding: "8px", textAlign: "center", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: !dayInfo.isOpen ? "rgba(244,67,54,0.1)" : "transparent" }}>
                             {!dayInfo.isOpen ? (
