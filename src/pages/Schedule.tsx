@@ -74,6 +74,11 @@ const formatTime = (decimalHour: number): string => {
   return `${hour12}:${minute.toString().padStart(2, "0")}${ampm}`;
 };
 
+const parseTimeToDecimal = (timeStr: string): number => {
+  const [hour, minute] = timeStr.split(":").map(Number);
+  return hour + minute / 60;
+};
+
 const getWeekDates = (startDate: Dayjs) => {
   return daysOfWeek.map((day, index) => {
     const date = startDate.add(index, "day");
@@ -126,6 +131,26 @@ const getMonthDates = (startDate: Dayjs) => {
   return weeks;
 };
 
+const getActualShiftHours = (shiftDisplay: string, lunchMinutes: number): number => {
+  if (!shiftDisplay || shiftDisplay === "off") return 0;
+  const [startStr, endStr] = shiftDisplay.split("-");
+  if (!startStr || !endStr) return 0;
+  
+  const parseTime = (timeStr: string): number => {
+    let hour = parseInt(timeStr.match(/\d+/)?.[0] || "0");
+    const minute = parseInt(timeStr.match(/:(\d+)/)?.[1] || "0");
+    const isPm = timeStr.includes("pm");
+    if (isPm && hour !== 12) hour += 12;
+    if (!isPm && hour === 12) hour = 0;
+    return hour + minute / 60;
+  };
+  
+  const startHour = parseTime(startStr);
+  const endHour = parseTime(endStr);
+  const totalHours = endHour - startHour;
+  return Math.max(0, totalHours - (lunchMinutes / 60));
+};
+
 const getDayPaidHours = (day: any, operationalHours: OperationalHours, workWeek: WorkWeek, holidays: Holiday[], lunchMinutes: number): number => {
   const dayKey = day.dayKey as keyof WorkWeek;
   
@@ -137,8 +162,8 @@ const getDayPaidHours = (day: any, operationalHours: OperationalHours, workWeek:
   if (holiday) {
     if (holiday.is_closed) return 0;
     if (holiday.open_time && holiday.close_time) {
-      const openHour = parseFloat(holiday.open_time.split(":")[0]) + parseFloat(holiday.open_time.split(":")[1]) / 60;
-      const closeHour = parseFloat(holiday.close_time.split(":")[0]) + parseFloat(holiday.close_time.split(":")[1]) / 60;
+      const openHour = parseTimeToDecimal(holiday.open_time);
+      const closeHour = parseTimeToDecimal(holiday.close_time);
       return Math.max(0, (closeHour - openHour) - (lunchMinutes / 60));
     }
   }
@@ -148,8 +173,8 @@ const getDayPaidHours = (day: any, operationalHours: OperationalHours, workWeek:
     return 0;
   }
   
-  const openHour = parseFloat(dayHours.open.split(":")[0]) + parseFloat(dayHours.open.split(":")[1]) / 60;
-  const closeHour = parseFloat(dayHours.close.split(":")[0]) + parseFloat(dayHours.close.split(":")[1]) / 60;
+  const openHour = parseTimeToDecimal(dayHours.open);
+  const closeHour = parseTimeToDecimal(dayHours.close);
   return Math.max(0, (closeHour - openHour) - (lunchMinutes / 60));
 };
 
@@ -206,11 +231,10 @@ const generateStaggeredShifts = (
   const respectDayOff = autoRules.respect_day_off === true;
   const respectHoursLimits = autoRules.respect_hours_limits === true;
   const targetShiftHours = autoRules.target_shift_hours || 8;
+  const lunchMinutes = autoRules.lunch_minutes || 30;
+  const paidShiftHours = targetShiftHours - (lunchMinutes / 60);
   const minTechsPerShift = autoRules.min_techs_per_shift || 1;
   const maxTechsPerShift = autoRules.max_techs_per_shift || 3;
-  
-  // Create a copy of technicians we can modify
-  let availableTechs = [...technicians].filter(t => t.include_in_scheduling !== false);
   
   // Sort by current hours (lowest first) for fair distribution
   const sortByHours = (techs: Technician[]) => {
@@ -241,16 +265,16 @@ const generateStaggeredShifts = (
       closeTime = holiday.close_time;
     }
     
-    const openHour = parseFloat(openTime.split(":")[0]) + parseFloat(openTime.split(":")[1]) / 60;
-    const closeHour = parseFloat(closeTime.split(":")[0]) + parseFloat(closeTime.split(":")[1]) / 60;
+    const openHour = parseTimeToDecimal(openTime);
+    const closeHour = parseTimeToDecimal(closeTime);
     const totalOpenHours = closeHour - openHour;
     
-    // Calculate how many techs we need for this day
+    // Calculate how many techs we need for this day based on coverage
     let techsNeeded = Math.ceil(totalOpenHours / targetShiftHours);
     techsNeeded = Math.max(minTechsPerShift, Math.min(maxTechsPerShift, techsNeeded));
     
     // Get eligible techs for this day
-    let eligibleTechs = [...availableTechs];
+    let eligibleTechs = [...technicians].filter(t => t.include_in_scheduling !== false);
     
     // Filter by day off
     if (respectDayOff) {
@@ -262,7 +286,7 @@ const generateStaggeredShifts = (
     // Filter by max hours (if they would exceed max with one more shift)
     if (respectHoursLimits) {
       eligibleTechs = eligibleTechs.filter(tech => {
-        if (tech.max_hours > 0 && weeklyHours[tech.id] + targetShiftHours > tech.max_hours) {
+        if (tech.max_hours > 0 && weeklyHours[tech.id] + paidShiftHours > tech.max_hours) {
           return false;
         }
         return true;
@@ -272,7 +296,7 @@ const generateStaggeredShifts = (
     // Sort by current hours (lowest first)
     eligibleTechs = sortByHours(eligibleTechs);
     
-    // Apply rotation pattern (shift the array based on day index)
+    // Apply rotation pattern
     if (rotationPattern > 0 && eligibleTechs.length > 0) {
       const rotationOffset = Math.floor(dayIndex / rotationPattern) % eligibleTechs.length;
       if (rotationOffset > 0) {
@@ -286,10 +310,9 @@ const generateStaggeredShifts = (
     
     // Assign shifts to the needed number of techs
     const techsToAssign = Math.min(techsNeeded, eligibleTechs.length);
-    
     if (techsToAssign === 0) continue;
     
-    // Calculate staggered start times
+    // Calculate staggered shift start times
     const shiftStartTimes: number[] = [];
     if (techsToAssign === 1) {
       // Single tech: start at opening time
@@ -318,7 +341,8 @@ const generateStaggeredShifts = (
       const shiftDisplay = `${startTimeStr}-${endTimeStr}`;
       
       schedule[tech.id][day.date] = shiftDisplay;
-      weeklyHours[tech.id] += targetShiftHours;
+      // Add PAID hours (after lunch)
+      weeklyHours[tech.id] += paidShiftHours;
     }
   }
   
@@ -354,7 +378,7 @@ const generateStaggeredShifts = (
         if (respectDayOff && (tech.primary_day_off === dayName || tech.secondary_day_off === dayName)) continue;
         
         // Check max hours
-        if (tech.max_hours > 0 && weeklyHours[tech.id] + targetShiftHours > tech.max_hours) {
+        if (tech.max_hours > 0 && weeklyHours[tech.id] + paidShiftHours > tech.max_hours) {
           continue;
         }
         
@@ -365,8 +389,8 @@ const generateStaggeredShifts = (
           closeTime = holiday.close_time;
         }
         
-        const openHour = parseFloat(openTime.split(":")[0]) + parseFloat(openTime.split(":")[1]) / 60;
-        const closeHour = parseFloat(closeTime.split(":")[0]) + parseFloat(closeTime.split(":")[1]) / 60;
+        const openHour = parseTimeToDecimal(openTime);
+        const closeHour = parseTimeToDecimal(closeTime);
         
         // Add a shift
         let startHour = openHour;
@@ -381,8 +405,8 @@ const generateStaggeredShifts = (
         const shiftDisplay = `${startTimeStr}-${endTimeStr}`;
         
         schedule[tech.id][day.date] = shiftDisplay;
-        weeklyHours[tech.id] += targetShiftHours;
-        neededHours -= targetShiftHours;
+        weeklyHours[tech.id] += paidShiftHours;
+        neededHours -= paidShiftHours;
       }
     }
   }
@@ -401,8 +425,8 @@ const generateStaggeredShifts = (
         
         if (schedule[tech.id][day.date] !== "off") {
           schedule[tech.id][day.date] = "off";
-          weeklyHours[tech.id] -= targetShiftHours;
-          excessHours -= targetShiftHours;
+          weeklyHours[tech.id] -= paidShiftHours;
+          excessHours -= paidShiftHours;
         }
       }
     }
@@ -543,7 +567,7 @@ export const Schedule: React.FC = () => {
       scheduleMap[tech.id] = {};
       dateStrings.forEach((date) => {
         const existing = scheduleData?.find((s: any) => s.technician_id === tech.id && s.date === date);
-        scheduleMap[tech.id][date] = existing ? existing.shift_start && existing.shift_end ? `${existing.shift_start}-${existing.shift_end}` : "work" : "off";
+        scheduleMap[tech.id][date] = existing ? `${existing.shift_start}-${existing.shift_end}` : "off";
       });
     });
     setSchedule(scheduleMap);
@@ -558,7 +582,7 @@ export const Schedule: React.FC = () => {
         for (const day of dates) {
           const shiftValue = scheduleMap[tech.id]?.[day.date] || "off";
           if (shiftValue !== "off") {
-            total += getDayPaidHours(day, shopSettings.operational_hours, shopSettings.work_week, holidays, lunchMinutes);
+            total += getActualShiftHours(shiftValue, lunchMinutes);
           }
         }
         tempHours[tech.id] = total;
@@ -577,9 +601,6 @@ export const Schedule: React.FC = () => {
       return;
     }
     
-    console.log("Auto Rules:", shopSettings.auto_schedule_rules);
-    console.log("Technicians:", technicians.map(t => ({ id: t.id, name: `${t.first_name} ${t.last_name}`, min: t.min_hours, max: t.max_hours, dayOff: t.primary_day_off })));
-    
     const autoRules = shopSettings.auto_schedule_rules;
     let techsToSchedule = technicians.filter(t => t.include_in_scheduling !== false);
     const rotationDays = rotationPattern === 0 ? customRotation : rotationPattern;
@@ -591,6 +612,7 @@ export const Schedule: React.FC = () => {
     
     setSchedule(newSchedule);
     
+    const lunchMinutes = shopSettings.auto_schedule_rules.lunch_minutes || 30;
     let tempHours: Record<string, number> = {};
     let tempPay: Record<string, number> = {};
     let tempTotal = 0;
@@ -599,13 +621,12 @@ export const Schedule: React.FC = () => {
       for (const day of dates) {
         const shiftValue = newSchedule[tech.id]?.[day.date] || "off";
         if (shiftValue !== "off") {
-          total += getDayPaidHours(day, shopSettings.operational_hours, shopSettings.work_week, holidays, shopSettings.auto_schedule_rules.lunch_minutes || 30);
+          total += getActualShiftHours(shiftValue, lunchMinutes);
         }
       }
       tempHours[tech.id] = total;
       tempPay[tech.id] = calculatePay(total, tech.pay_rate, tech.pay_type);
       tempTotal += tempPay[tech.id];
-      console.log(`${tech.first_name} ${tech.last_name}: ${total.toFixed(1)} hours (min: ${tech.min_hours}, max: ${tech.max_hours})`);
     }
     setWeeklyHours(tempHours);
     setWeeklyPay(tempPay);
@@ -631,7 +652,6 @@ export const Schedule: React.FC = () => {
         for (const day of dates) {
           const shiftValue = schedule[tech.id]?.[day.date] || "off";
           if (shiftValue !== "off") {
-            const dayHours = getDayPaidHours(day, shopSettings!.operational_hours, shopSettings!.work_week, holidays, shopSettings!.auto_schedule_rules.lunch_minutes || 30);
             let shiftStart = "09:00";
             let shiftEnd = "17:00";
             if (shiftValue.includes("-")) {
@@ -639,13 +659,14 @@ export const Schedule: React.FC = () => {
               shiftStart = parts[0];
               shiftEnd = parts[1];
             }
+            const paidHours = getActualShiftHours(shiftValue, shopSettings?.auto_schedule_rules.lunch_minutes || 30);
             newEntries.push({ 
               shop_id: currentShopId, 
               technician_id: tech.id, 
               date: day.date, 
               shift_start: shiftStart, 
               shift_end: shiftEnd,
-              pay_earned: calculatePay(dayHours, tech.pay_rate, tech.pay_type)
+              pay_earned: calculatePay(paidHours, tech.pay_rate, tech.pay_type)
             });
           }
         }
@@ -709,7 +730,7 @@ export const Schedule: React.FC = () => {
         for (const day of dates) {
           const shiftValue = template.schedule_data[tech.id]?.[day.date] || "off";
           if (shiftValue !== "off") {
-            total += getDayPaidHours(day, shopSettings.operational_hours, shopSettings.work_week, holidays, lunchMinutes);
+            total += getActualShiftHours(shiftValue, lunchMinutes);
           }
         }
         tempHours[tech.id] = total;
@@ -749,7 +770,7 @@ export const Schedule: React.FC = () => {
       for (const day of dates) {
         const shiftVal = newSchedule[techId]?.[day.date] || "off";
         if (shiftVal !== "off") {
-          total += getDayPaidHours(day, shopSettings.operational_hours, shopSettings.work_week, holidays, lunchMinutes);
+          total += getActualShiftHours(shiftVal, lunchMinutes);
         }
       }
       const newHours = { ...weeklyHours, [techId]: total };
@@ -892,7 +913,7 @@ export const Schedule: React.FC = () => {
                   <td style={{ padding: "12px", textAlign: "center", border: "1px solid rgba(255,255,255,0.1)" }}>
                     ${(weeklyPay[tech.id] || 0).toFixed(2)}
                   </td>
-                </tr>
+                </table>
               ))}
             </tbody>
           </table>
@@ -941,7 +962,7 @@ export const Schedule: React.FC = () => {
                           </td>
                         );
                       })}
-                    </tr>
+                    </td>
                   ))}
                 </tbody>
               </table>
