@@ -89,47 +89,41 @@ const getWeekDates = (startDate: Dayjs) => {
 };
 
 const get2WeeksDates = (startDate: Dayjs) => {
-  const weeks = [];
-  for (let week = 0; week < 2; week++) {
-    const weekDates = [];
-    for (let day = 0; day < 7; day++) {
-      const date = startDate.add(week * 7 + day, "day");
-      weekDates.push({
-        name: dayLabels[day],
-        dayKey: daysOfWeek[day],
-        date: date.format("YYYY-MM-DD"),
-        display: `${dayLabels[day].slice(0,3)} ${date.format("MM/DD")}`,
-      });
-    }
-    weeks.push(weekDates);
+  const allDates = [];
+  for (let i = 0; i < 14; i++) {
+    const date = startDate.add(i, "day");
+    const dayIndex = date.day();
+    const dayKey = daysOfWeek[dayIndex === 0 ? 6 : dayIndex - 1];
+    allDates.push({
+      name: dayLabels[dayIndex === 0 ? 6 : dayIndex - 1],
+      dayKey: dayKey,
+      date: date.format("YYYY-MM-DD"),
+      display: `${dayLabels[dayIndex === 0 ? 6 : dayIndex - 1].slice(0,3)} ${date.format("MM/DD")}`,
+    });
   }
-  return weeks;
+  return allDates;
 };
 
 const getMonthDates = (startDate: Dayjs) => {
   const year = startDate.year();
   const month = startDate.month();
   const firstDayOfMonth = dayjs(new Date(year, month, 1));
-  const startDayOfWeek = firstDayOfMonth.day();
-  const startOffset = startDayOfWeek === 0 ? 6 : startDayOfWeek - 1;
-  const calendarStart = firstDayOfMonth.subtract(startOffset, "day");
-  
-  const weeks = [];
-  for (let week = 0; week < 6; week++) {
-    const weekDates = [];
-    for (let day = 0; day < 7; day++) {
-      const date = calendarStart.add(week * 7 + day, "day");
-      weekDates.push({
-        name: dayLabels[day],
-        dayKey: daysOfWeek[day],
-        date: date.format("YYYY-MM-DD"),
-        display: `${dayLabels[day].slice(0,3)} ${date.format("MM/DD")}`,
-        isCurrentMonth: date.month() === month,
-      });
-    }
-    weeks.push(weekDates);
+  const lastDayOfMonth = firstDayOfMonth.endOf("month");
+  const allDates = [];
+  let currentDate = firstDayOfMonth;
+  while (currentDate.isBefore(lastDayOfMonth) || currentDate.isSame(lastDayOfMonth, "day")) {
+    const dayIndex = currentDate.day();
+    const dayKey = daysOfWeek[dayIndex === 0 ? 6 : dayIndex - 1];
+    allDates.push({
+      name: dayLabels[dayIndex === 0 ? 6 : dayIndex - 1],
+      dayKey: dayKey,
+      date: currentDate.format("YYYY-MM-DD"),
+      display: `${dayLabels[dayIndex === 0 ? 6 : dayIndex - 1].slice(0,3)} ${currentDate.format("MM/DD")}`,
+      isCurrentMonth: true,
+    });
+    currentDate = currentDate.add(1, "day");
   }
-  return weeks;
+  return allDates;
 };
 
 const getActualShiftHours = (shiftDisplay: string, lunchMinutes: number): number => {
@@ -211,26 +205,24 @@ const calculatePay = (hours: number, payRate: number, payType: string): number =
 };
 
 const getRoleColor = (role: string): string => {
-  switch (role?.toLowerCase()) {
-    case "management": return "#faad14";
-    case "lead": return "#722ed1";
-    case "foreman": return "#13c2c2";
-    case "tech": return "#1890ff";
-    case "lube tech": return "#52c41a";
-    default: return "#8c8c8c";
-  }
+  const roleLower = role?.toLowerCase() || "";
+  if (roleLower === "management" || roleLower === "manager") return "#faad14";
+  if (roleLower === "lead" || roleLower === "lead tech") return "#722ed1";
+  if (roleLower === "foreman") return "#13c2c2";
+  if (roleLower === "tech" || roleLower === "technician") return "#1890ff";
+  if (roleLower === "lube tech" || roleLower === "lube") return "#52c41a";
+  return "#8c8c8c";
 };
 
 const getRoleDisplay = (role: string, title: string): string => {
-  if (title) return title;
-  switch (role?.toLowerCase()) {
-    case "management": return "Management";
-    case "lead": return "Lead Tech";
-    case "foreman": return "Foreman";
-    case "tech": return "Technician";
-    case "lube tech": return "Lube Tech";
-    default: return "Staff";
-  }
+  if (title && title.trim() !== "") return title;
+  const roleLower = role?.toLowerCase() || "";
+  if (roleLower === "management" || roleLower === "manager") return "Management";
+  if (roleLower === "lead" || roleLower === "lead tech") return "Lead Tech";
+  if (roleLower === "foreman") return "Foreman";
+  if (roleLower === "tech" || roleLower === "technician") return "Technician";
+  if (roleLower === "lube tech" || roleLower === "lube") return "Lube Tech";
+  return "Staff";
 };
 
 const generateStaggeredShifts = (
@@ -262,11 +254,12 @@ const generateStaggeredShifts = (
   
   const rolePriority = (tech: Technician): number => {
     const role = tech.role?.toLowerCase() || "";
-    if (role === "management") return 1;
-    if (role === "lead" || role === "foreman") return 2;
-    if (role === "tech") return 3;
-    if (role === "lube tech") return 4;
-    return 5;
+    if (role === "management" || role === "manager") return 1;
+    if (role === "lead" || role === "lead tech") return 2;
+    if (role === "foreman") return 3;
+    if (role === "tech" || role === "technician") return 4;
+    if (role === "lube tech" || role === "lube") return 5;
+    return 6;
   };
   
   for (let dayIndex = 0; dayIndex < dates.length; dayIndex++) {
@@ -443,16 +436,13 @@ export const Schedule: React.FC = () => {
   const [tempLunchMinutes, setTempLunchMinutes] = useState<number>(30);
 
   let dates: any[] = [];
-  let weeks: any[][] = [];
   
   if (duration === "week") {
     dates = getWeekDates(startDate);
   } else if (duration === "2weeks") {
-    weeks = get2WeeksDates(startDate);
-    dates = weeks.flat();
+    dates = get2WeeksDates(startDate);
   } else {
-    weeks = getMonthDates(startDate);
-    dates = weeks.flat();
+    dates = getMonthDates(startDate);
   }
 
   useEffect(() => {
@@ -466,6 +456,10 @@ export const Schedule: React.FC = () => {
   useEffect(() => {
     if (duration === "week") {
       setStartDate(dayjs().startOf("week"));
+    } else if (duration === "2weeks") {
+      setStartDate(dayjs().startOf("week"));
+    } else {
+      setStartDate(dayjs().startOf("month"));
     }
   }, [duration]);
 
@@ -857,129 +851,68 @@ export const Schedule: React.FC = () => {
   }));
 
   const renderCalendarView = () => {
-    if (duration === "week") {
-      const weekDates = dates;
-      return (
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                <th style={{ padding: "12px", textAlign: "left", backgroundColor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}>Technician</th>
-                {weekDates.map((day) => (
-                  <th key={day.date} style={{ padding: "12px", textAlign: "center", backgroundColor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}>
-                    <div>{day.display}</div>
-                    <div style={{ fontSize: "10px", color: "#9CA3AF" }}>{getDayDisplayInfo(day).timeDisplay}</div>
-                  </th>
-                ))}
-                <th style={{ padding: "12px", textAlign: "center", backgroundColor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}>Hours</th>
-                <th style={{ padding: "12px", textAlign: "center", backgroundColor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}>Pay</th>
-              </tr>
-            </thead>
-            <tbody>
-              {technicians.filter(t => t.include_in_scheduling !== false).map((tech) => {
-                const roleDisplay = getRoleDisplay(tech.role, tech.title);
-                const roleColor = getRoleColor(tech.role);
-                return (
-                  <tr key={tech.id}>
-                    <td style={{ padding: "12px", border: "1px solid rgba(255,255,255,0.1)" }}>
-                      <div style={{ fontWeight: "bold" }}>{tech.first_name} {tech.last_name}</div>
-                      <Tag color={roleColor} style={{ fontSize: "10px", marginTop: "4px" }}>{roleDisplay}</Tag>
-                    </td>
-                    {weekDates.map((day) => {
-                      const dayInfo = getDayDisplayInfo(day);
-                      const shiftValue = schedule[tech.id]?.[day.date] || "off";
-                      return (
-                        <td key={day.date} style={{ padding: "8px", textAlign: "center", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: !dayInfo.isOpen ? "rgba(244,67,54,0.1)" : "transparent" }}>
-                          {!dayInfo.isOpen ? (
-                            <Tag color="red">CLOSED</Tag>
-                          ) : (
-                            <Select
-                              value={shiftValue === "off" ? "off" : shiftValue}
-                              onChange={(value: unknown) => handleShiftChange(tech.id, day.date, String(value))}
-                              style={{ width: "120px" }}
-                              size="small"
-                            >
-                              <Option value="off">OFF</Option>
-                              <Option value={dayInfo.timeDisplay}>{dayInfo.timeDisplay}</Option>
-                            </Select>
-                          )}
-                        </td>
-                      );
-                    })}
-                    <td style={{ padding: "12px", textAlign: "center", border: "1px solid rgba(255,255,255,0.1)" }}>
-                      <Tag color={weeklyHours[tech.id] > (technicians.find(t => t.id === tech.id)?.max_hours || 0) ? "red" : "blue"}>
-                        {(weeklyHours[tech.id] || 0).toFixed(1)}
-                      </Tag>
-                    </td>
-                    <td style={{ padding: "12px", textAlign: "center", border: "1px solid rgba(255,255,255,0.1)" }}>
-                      ${(weeklyPay[tech.id] || 0).toFixed(2)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      );
-    } else {
-      return (
-        <div style={{ overflowX: "auto" }}>
-          {weeks.map((week, weekIndex) => (
-            <div key={weekIndex} style={{ marginBottom: "24px" }}>
-              <h4 style={{ color: "#E5E7EB", marginBottom: "12px" }}>Week {weekIndex + 1}</h4>
-              <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: "16px" }}>
-                <thead>
-                  <tr>
-                    <th style={{ padding: "12px", textAlign: "left", backgroundColor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}>Technician</th>
-                    {week.map((day) => (
-                      <th key={day.date} style={{ padding: "12px", textAlign: "center", backgroundColor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}>
-                        <div>{day.display}</div>
-                        <div style={{ fontSize: "10px", color: "#9CA3AF" }}>{getDayDisplayInfo(day).timeDisplay}</div>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {technicians.filter(t => t.include_in_scheduling !== false).map((tech) => {
-                    const roleDisplay = getRoleDisplay(tech.role, tech.title);
-                    const roleColor = getRoleColor(tech.role);
+    return (
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr>
+              <th style={{ padding: "12px", textAlign: "left", backgroundColor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}>Technician</th>
+              {dates.map((day) => (
+                <th key={day.date} style={{ padding: "12px", textAlign: "center", backgroundColor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}>
+                  <div>{day.display}</div>
+                  <div style={{ fontSize: "10px", color: "#9CA3AF" }}>{getDayDisplayInfo(day).timeDisplay}</div>
+                </th>
+              ))}
+              <th style={{ padding: "12px", textAlign: "center", backgroundColor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}>Hours</th>
+              <th style={{ padding: "12px", textAlign: "center", backgroundColor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}>Pay</th>
+            </tr>
+          </thead>
+          <tbody>
+            {technicians.filter(t => t.include_in_scheduling !== false).map((tech) => {
+              const roleDisplay = getRoleDisplay(tech.role, tech.title);
+              const roleColor = getRoleColor(tech.role);
+              return (
+                <tr key={tech.id}>
+                  <td style={{ padding: "12px", border: "1px solid rgba(255,255,255,0.1)" }}>
+                    <div style={{ fontWeight: "bold" }}>{tech.first_name} {tech.last_name}</div>
+                    <Tag color={roleColor} style={{ fontSize: "10px", marginTop: "4px" }}>{roleDisplay}</Tag>
+                  </td>
+                  {dates.map((day) => {
+                    const dayInfo = getDayDisplayInfo(day);
+                    const shiftValue = schedule[tech.id]?.[day.date] || "off";
                     return (
-                      <tr key={tech.id}>
-                        <td style={{ padding: "12px", border: "1px solid rgba(255,255,255,0.1)" }}>
-                          <div style={{ fontWeight: "bold" }}>{tech.first_name} {tech.last_name}</div>
-                          <Tag color={roleColor} style={{ fontSize: "10px", marginTop: "4px" }}>{roleDisplay}</Tag>
-                        </td>
-                        {week.map((day) => {
-                          const dayInfo = getDayDisplayInfo(day);
-                          const shiftValue = schedule[tech.id]?.[day.date] || "off";
-                          return (
-                            <td key={day.date} style={{ padding: "8px", textAlign: "center", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: !dayInfo.isOpen ? "rgba(244,67,54,0.1)" : "transparent" }}>
-                              {!dayInfo.isOpen ? (
-                                <Tag color="red">CLOSED</Tag>
-                              ) : (
-                                <Select
-                                  value={shiftValue === "off" ? "off" : shiftValue}
-                                  onChange={(value: unknown) => handleShiftChange(tech.id, day.date, String(value))}
-                                  style={{ width: "120px" }}
-                                  size="small"
-                                >
-                                  <Option value="off">OFF</Option>
-                                  <Option value={dayInfo.timeDisplay}>{dayInfo.timeDisplay}</Option>
-                                </Select>
-                              )}
-                            </td>
-                          );
-                        })}
-                      </tr>
+                      <td key={day.date} style={{ padding: "8px", textAlign: "center", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: !dayInfo.isOpen ? "rgba(244,67,54,0.1)" : "transparent" }}>
+                        {!dayInfo.isOpen ? (
+                          <Tag color="red">CLOSED</Tag>
+                        ) : (
+                          <Select
+                            value={shiftValue === "off" ? "off" : shiftValue}
+                            onChange={(value: unknown) => handleShiftChange(tech.id, day.date, String(value))}
+                            style={{ width: "120px" }}
+                            size="small"
+                          >
+                            <Option value="off">OFF</Option>
+                            <Option value={dayInfo.timeDisplay}>{dayInfo.timeDisplay}</Option>
+                          </Select>
+                        )}
+                      </td>
                     );
                   })}
-                </tbody>
-              </table>
-            </div>
-          ))}
-        </div>
-      );
-    }
+                  <td style={{ padding: "12px", textAlign: "center", border: "1px solid rgba(255,255,255,0.1)" }}>
+                    <Tag color={weeklyHours[tech.id] > (technicians.find(t => t.id === tech.id)?.max_hours || 0) ? "red" : "blue"}>
+                      {(weeklyHours[tech.id] || 0).toFixed(1)}
+                    </Tag>
+                  </td>
+                  <td style={{ padding: "12px", textAlign: "center", border: "1px solid rgba(255,255,255,0.1)" }}>
+                    ${(weeklyPay[tech.id] || 0).toFixed(2)}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
   };
 
   return (
@@ -993,15 +926,13 @@ export const Schedule: React.FC = () => {
               <Radio.Button value="month">Month</Radio.Button>
             </Radio.Group>
             
-            {duration !== "week" && (
-              <DatePicker
-                value={startDate}
-                onChange={(date) => date && setStartDate(date)}
-                picker={duration === "month" ? "month" : "date"}
-                format={duration === "month" ? "MMMM YYYY" : "MM/DD/YYYY"}
-                size="small"
-              />
-            )}
+            <DatePicker
+              value={startDate}
+              onChange={(date) => date && setStartDate(date)}
+              picker={duration === "month" ? "month" : "date"}
+              format={duration === "month" ? "MMMM YYYY" : "MM/DD/YYYY"}
+              size="small"
+            />
             
             <Select value={rotationPattern} onChange={setRotationPattern} style={{ width: "140px" }} size="small">
               <Option value={7}>Rotate Every 7 Days</Option>
