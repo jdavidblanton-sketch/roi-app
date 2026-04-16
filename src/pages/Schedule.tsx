@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { Table, Button, Select, Card, message, Switch, Space, Radio, Modal, Tag, Tooltip, InputNumber, Divider, Statistic, Row, Col, DatePicker, List, Popconfirm, Input } from "antd";
-import { SaveOutlined, ThunderboltOutlined, DollarOutlined, ClockCircleOutlined, SettingOutlined, CalendarOutlined, UnorderedListOutlined, FolderOpenOutlined, DeleteOutlined } from "@ant-design/icons";
+import { Table, Button, Select, Card, message, Switch, Space, Radio, Modal, Tag, Tooltip, InputNumber, Divider, Statistic, Row, Col, DatePicker, List, Popconfirm, Input, Avatar } from "antd";
+import { SaveOutlined, ThunderboltOutlined, DollarOutlined, ClockCircleOutlined, SettingOutlined, CalendarOutlined, UnorderedListOutlined, FolderOpenOutlined, DeleteOutlined, UserOutlined } from "@ant-design/icons";
 import { supabaseClient } from "../utils";
 import { Typography } from "antd";
 import dayjs, { Dayjs } from "dayjs";
@@ -12,6 +12,8 @@ interface Technician {
   id: string;
   first_name: string;
   last_name: string;
+  title: string;
+  role: string;
   min_hours: number;
   max_hours: number;
   pay_rate: number;
@@ -208,6 +210,29 @@ const calculatePay = (hours: number, payRate: number, payType: string): number =
   return hours * payRate;
 };
 
+const getRoleColor = (role: string): string => {
+  switch (role?.toLowerCase()) {
+    case "management": return "#faad14";
+    case "lead": return "#722ed1";
+    case "foreman": return "#13c2c2";
+    case "tech": return "#1890ff";
+    case "lube tech": return "#52c41a";
+    default: return "#8c8c8c";
+  }
+};
+
+const getRoleDisplay = (role: string, title: string): string => {
+  if (title) return title;
+  switch (role?.toLowerCase()) {
+    case "management": return "Management";
+    case "lead": return "Lead Tech";
+    case "foreman": return "Foreman";
+    case "tech": return "Technician";
+    case "lube tech": return "Lube Tech";
+    default: return "Staff";
+  }
+};
+
 const generateStaggeredShifts = (
   technicians: Technician[],
   dates: any[],
@@ -234,12 +259,17 @@ const generateStaggeredShifts = (
   const targetShiftHours = autoRules?.target_shift_hours || 8;
   const lunchMinutes = autoRules?.lunch_minutes || 30;
   const paidShiftHours = targetShiftHours - (lunchMinutes / 60);
-  const minTechsPerShift = autoRules?.min_techs_per_shift || 1;
-  const maxTechsPerShift = autoRules?.max_techs_per_shift || 3;
+  const minTechsPerShift = autoRules?.min_techs_per_shift || 2;
+  const maxTechsPerShift = autoRules?.max_techs_per_shift || 4;
   
-  // Sort by current hours (lowest first) for fair distribution
-  const sortByHours = (techs: Technician[]) => {
-    return [...techs].sort((a, b) => weeklyHours[a.id] - weeklyHours[b.id]);
+  // Sort technicians by role priority (management first, then lead, then techs)
+  const rolePriority = (tech: Technician): number => {
+    const role = tech.role?.toLowerCase() || "";
+    if (role === "management") return 1;
+    if (role === "lead" || role === "foreman") return 2;
+    if (role === "tech") return 3;
+    if (role === "lube tech") return 4;
+    return 5;
   };
   
   // For each day, determine who works
@@ -270,9 +300,8 @@ const generateStaggeredShifts = (
     const closeHour = parseTimeToDecimal(closeTime);
     const totalOpenHours = closeHour - openHour;
     
-    // Calculate how many techs we need for this day based on coverage
-    let techsNeeded = Math.ceil(totalOpenHours / targetShiftHours);
-    techsNeeded = Math.max(minTechsPerShift, Math.min(maxTechsPerShift, techsNeeded));
+    // Calculate how many techs we need based on max techs per shift
+    let techsNeeded = maxTechsPerShift;
     
     // Get eligible techs for this day
     let eligibleTechs = [...technicians].filter(t => t.include_in_scheduling !== false);
@@ -284,7 +313,7 @@ const generateStaggeredShifts = (
       );
     }
     
-    // Filter by max hours (if they would exceed max with one more shift)
+    // Filter by max hours
     if (respectHoursLimits) {
       eligibleTechs = eligibleTechs.filter(tech => {
         if (tech.max_hours > 0 && weeklyHours[tech.id] + paidShiftHours > tech.max_hours) {
@@ -294,10 +323,14 @@ const generateStaggeredShifts = (
       });
     }
     
-    // Sort by current hours (lowest first)
-    eligibleTechs = sortByHours(eligibleTechs);
+    // Sort by role priority (higher priority first) then by hours
+    eligibleTechs.sort((a, b) => {
+      const priorityCompare = rolePriority(a) - rolePriority(b);
+      if (priorityCompare !== 0) return priorityCompare;
+      return weeklyHours[a.id] - weeklyHours[b.id];
+    });
     
-    // Apply rotation pattern
+    // Apply rotation pattern for fair distribution among same role levels
     if (rotationPattern > 0 && eligibleTechs.length > 0) {
       const rotationOffset = Math.floor(dayIndex / rotationPattern) % eligibleTechs.length;
       if (rotationOffset > 0) {
@@ -310,30 +343,34 @@ const generateStaggeredShifts = (
       }
     }
     
-    // Assign shifts to the needed number of techs
+    // Assign shifts to needed number of techs
     const techsToAssign = Math.min(techsNeeded, eligibleTechs.length);
     if (techsToAssign === 0) continue;
     
-    // Calculate staggered shift start times
+    // Calculate staggered shift start times based on role
+    // Management gets opening shift, lead gets mid, techs get staggered
     const shiftStartTimes: number[] = [];
+    const shiftDuration = targetShiftHours;
+    
     if (techsToAssign === 1) {
       shiftStartTimes.push(openHour);
     } else {
-      const staggerStep = (totalOpenHours - targetShiftHours) / (techsToAssign - 1);
+      // Spread shifts across the day
+      const step = (totalOpenHours - shiftDuration) / (techsToAssign - 1);
       for (let i = 0; i < techsToAssign; i++) {
-        let startTime = openHour + (staggerStep * i);
-        if (startTime + targetShiftHours > closeHour) {
-          startTime = closeHour - targetShiftHours;
+        let startTime = openHour + (step * i);
+        if (startTime + shiftDuration > closeHour) {
+          startTime = closeHour - shiftDuration;
         }
         shiftStartTimes.push(startTime);
       }
     }
     
-    // Assign shifts
+    // Assign shifts - management gets earliest, lead gets middle, techs get rest
     for (let i = 0; i < techsToAssign && i < eligibleTechs.length; i++) {
       const tech = eligibleTechs[i];
       const startHour = shiftStartTimes[i];
-      const endHour = startHour + targetShiftHours;
+      const endHour = startHour + shiftDuration;
       
       const startTimeStr = formatTime(startHour);
       const endTimeStr = formatTime(endHour);
@@ -344,7 +381,7 @@ const generateStaggeredShifts = (
     }
   }
   
-  // SECOND PASS: Ensure minimum hours for all techs
+  // SECOND PASS: Ensure minimum hours
   if (respectHoursLimits) {
     for (const tech of technicians) {
       if (tech.min_hours <= 0) continue;
@@ -367,9 +404,7 @@ const generateStaggeredShifts = (
         
         if (respectDayOff && (tech.primary_day_off === dayName || tech.secondary_day_off === dayName)) continue;
         
-        if (tech.max_hours > 0 && weeklyHours[tech.id] + paidShiftHours > tech.max_hours) {
-          continue;
-        }
+        if (tech.max_hours > 0 && weeklyHours[tech.id] + paidShiftHours > tech.max_hours) continue;
         
         let openTime = dayHours.open;
         let closeTime = dayHours.close;
@@ -395,26 +430,6 @@ const generateStaggeredShifts = (
         schedule[tech.id][day.date] = shiftDisplay;
         weeklyHours[tech.id] += paidShiftHours;
         neededHours -= paidShiftHours;
-      }
-    }
-  }
-  
-  // THIRD PASS: Ensure no tech exceeds max hours
-  if (respectHoursLimits) {
-    for (const tech of technicians) {
-      if (tech.max_hours <= 0) continue;
-      if (weeklyHours[tech.id] <= tech.max_hours) continue;
-      
-      let excessHours = weeklyHours[tech.id] - tech.max_hours;
-      
-      for (let dayIndex = dates.length - 1; dayIndex >= 0 && excessHours > 0; dayIndex--) {
-        const day = dates[dayIndex];
-        
-        if (schedule[tech.id][day.date] !== "off") {
-          schedule[tech.id][day.date] = "off";
-          weeklyHours[tech.id] -= paidShiftHours;
-          excessHours -= paidShiftHours;
-        }
       }
     }
   }
@@ -777,7 +792,24 @@ export const Schedule: React.FC = () => {
   };
 
   const listColumns = [
-    { title: "Tech", dataIndex: "name", key: "name", fixed: "left" as const, width: 150 },
+    { 
+      title: "Tech", 
+      dataIndex: "name", 
+      key: "name", 
+      fixed: "left" as const, 
+      width: 180,
+      render: (_: any, record: any) => {
+        const tech = technicians.find(t => t.id === record.id);
+        const roleDisplay = getRoleDisplay(tech?.role || "", tech?.title || "");
+        const roleColor = getRoleColor(tech?.role || "");
+        return (
+          <div>
+            <div style={{ fontWeight: "bold" }}>{record.name}</div>
+            <Tag color={roleColor} style={{ fontSize: "10px", marginTop: "4px" }}>{roleDisplay}</Tag>
+          </div>
+        );
+      }
+    },
     ...dates.map((day) => {
       const dayInfo = getDayDisplayInfo(day);
       return {
@@ -813,7 +845,7 @@ export const Schedule: React.FC = () => {
         },
       };
     }),
-    { title: "Hours", key: "hours", width: 70, render: (_: any, record: any) => {
+    { title: "Hours", key: "hours", width: 80, render: (_: any, record: any) => {
         const total = weeklyHours[record.id] || 0;
         const tech = technicians.find(t => t.id === record.id);
         let color = "blue";
@@ -868,42 +900,49 @@ export const Schedule: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {technicians.filter(t => t.include_in_scheduling !== false).map((tech) => (
-                <tr key={tech.id}>
-                  <td style={{ padding: "12px", border: "1px solid rgba(255,255,255,0.1)" }}>{tech.first_name} {tech.last_name}</td>
-                  {weekDates.map((day) => {
-                    const dayInfo = getDayDisplayInfo(day);
-                    const shiftValue = schedule[tech.id]?.[day.date] || "off";
-                    return (
-                      <td key={day.date} style={{ padding: "8px", textAlign: "center", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: !dayInfo.isOpen ? "rgba(244,67,54,0.1)" : "transparent" }}>
-                        {!dayInfo.isOpen ? (
-                          <Tag color="red">CLOSED</Tag>
-                        ) : (
-                          <Select
-                            value={shiftValue === "off" ? "off" : shiftValue}
-                            onChange={(v) => handleShiftChange(tech.id, day.date, v)}
-                            style={{ width: "120px" }}
-                            size="small"
-                          >
-                            <Option value="off">OFF</Option>
-                            <Option value={dayInfo.timeDisplay}>{dayInfo.timeDisplay}</Option>
-                          </Select>
-                        )}
-                      </td>
-                    );
-                  })}
-                  <td style={{ padding: "12px", textAlign: "center", border: "1px solid rgba(255,255,255,0.1)" }}>
-                    <Tag color={weeklyHours[tech.id] > (technicians.find(t => t.id === tech.id)?.max_hours || 0) ? "red" : "blue"}>
-                      {(weeklyHours[tech.id] || 0).toFixed(1)}
-                    </Tag>
-                  </td>
-                  <td style={{ padding: "12px", textAlign: "center", border: "1px solid rgba(255,255,255,0.1)" }}>
-                    ${(weeklyPay[tech.id] || 0).toFixed(2)}
-                  </td>
-                </tr>
-              ))}
+              {technicians.filter(t => t.include_in_scheduling !== false).map((tech) => {
+                const roleDisplay = getRoleDisplay(tech.role, tech.title);
+                const roleColor = getRoleColor(tech.role);
+                return (
+                  <tr key={tech.id}>
+                    <td style={{ padding: "12px", border: "1px solid rgba(255,255,255,0.1)" }}>
+                      <div style={{ fontWeight: "bold" }}>{tech.first_name} {tech.last_name}</div>
+                      <Tag color={roleColor} style={{ fontSize: "10px", marginTop: "4px" }}>{roleDisplay}</Tag>
+                    </td>
+                    {weekDates.map((day) => {
+                      const dayInfo = getDayDisplayInfo(day);
+                      const shiftValue = schedule[tech.id]?.[day.date] || "off";
+                      return (
+                        <td key={day.date} style={{ padding: "8px", textAlign: "center", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: !dayInfo.isOpen ? "rgba(244,67,54,0.1)" : "transparent" }}>
+                          {!dayInfo.isOpen ? (
+                            <Tag color="red">CLOSED</Tag>
+                          ) : (
+                            <Select
+                              value={shiftValue === "off" ? "off" : shiftValue}
+                              onChange={(v) => handleShiftChange(tech.id, day.date, v)}
+                              style={{ width: "120px" }}
+                              size="small"
+                            >
+                              <Option value="off">OFF</Option>
+                              <Option value={dayInfo.timeDisplay}>{dayInfo.timeDisplay}</Option>
+                            </Select>
+                          )}
+                        </td>
+                      );
+                    })}
+                    <td style={{ padding: "12px", textAlign: "center", border: "1px solid rgba(255,255,255,0.1)" }}>
+                      <Tag color={weeklyHours[tech.id] > (technicians.find(t => t.id === tech.id)?.max_hours || 0) ? "red" : "blue"}>
+                        {(weeklyHours[tech.id] || 0).toFixed(1)}
+                      </Tag>
+                     </td>
+                    <td style={{ padding: "12px", textAlign: "center", border: "1px solid rgba(255,255,255,0.1)" }}>
+                      ${(weeklyPay[tech.id] || 0).toFixed(2)}
+                     </td>
+                  </tr>
+                );
+              })}
             </tbody>
-          </table>
+           </>
         </div>
       );
     } else {
@@ -925,34 +964,41 @@ export const Schedule: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {technicians.filter(t => t.include_in_scheduling !== false).map((tech) => (
-                    <tr key={tech.id}>
-                      <td style={{ padding: "12px", border: "1px solid rgba(255,255,255,0.1)" }}>{tech.first_name} {tech.last_name}</td>
-                      {week.map((day) => {
-                        const dayInfo = getDayDisplayInfo(day);
-                        const shiftValue = schedule[tech.id]?.[day.date] || "off";
-                        return (
-                          <td key={day.date} style={{ padding: "8px", textAlign: "center", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: !dayInfo.isOpen ? "rgba(244,67,54,0.1)" : "transparent" }}>
-                            {!dayInfo.isOpen ? (
-                              <Tag color="red">CLOSED</Tag>
-                            ) : (
-                              <Select
-                                value={shiftValue === "off" ? "off" : shiftValue}
-                                onChange={(v) => handleShiftChange(tech.id, day.date, v)}
-                                style={{ width: "120px" }}
-                                size="small"
-                              >
-                                <Option value="off">OFF</Option>
-                                <Option value={dayInfo.timeDisplay}>{dayInfo.timeDisplay}</Option>
-                              </Select>
-                            )}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
+                  {technicians.filter(t => t.include_in_scheduling !== false).map((tech) => {
+                    const roleDisplay = getRoleDisplay(tech.role, tech.title);
+                    const roleColor = getRoleColor(tech.role);
+                    return (
+                      <tr key={tech.id}>
+                        <td style={{ padding: "12px", border: "1px solid rgba(255,255,255,0.1)" }}>
+                          <div style={{ fontWeight: "bold" }}>{tech.first_name} {tech.last_name}</div>
+                          <Tag color={roleColor} style={{ fontSize: "10px", marginTop: "4px" }}>{roleDisplay}</Tag>
+                        </td>
+                        {week.map((day) => {
+                          const dayInfo = getDayDisplayInfo(day);
+                          const shiftValue = schedule[tech.id]?.[day.date] || "off";
+                          return (
+                            <td key={day.date} style={{ padding: "8px", textAlign: "center", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: !dayInfo.isOpen ? "rgba(244,67,54,0.1)" : "transparent" }}>
+                              {!dayInfo.isOpen ? (
+                                <Tag color="red">CLOSED</Tag>
+                              ) : (
+                                <Select
+                                  value={shiftValue === "off" ? "off" : shiftValue}
+                                  onChange={(v) => handleShiftChange(tech.id, day.date, v)}
+                                  style={{ width: "120px" }}
+                                  size="small"
+                                >
+                                  <Option value="off">OFF</Option>
+                                  <Option value={dayInfo.timeDisplay}>{dayInfo.timeDisplay}</Option>
+                                </Select>
+                              )}
+                             </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
                 </tbody>
-              </table>
+              </View>
             </div>
           ))}
         </div>
