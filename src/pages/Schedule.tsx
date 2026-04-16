@@ -81,49 +81,57 @@ const parseTimeToDecimal = (timeStr: string): number => {
   return hour + minute / 60;
 };
 
+// Unified date generation - all return the same format
 const getWeekDates = (startDate: Dayjs) => {
   return daysOfWeek.map((day, index) => {
     const date = startDate.add(index, "day");
-    return { name: dayLabels[index], dayKey: day, date: date.format("YYYY-MM-DD"), display: `${dayLabels[index].slice(0,3)} ${date.format("MM/DD")}` };
+    return { 
+      name: dayLabels[index], 
+      dayKey: day, 
+      date: date.format("YYYY-MM-DD"), 
+      display: `${dayLabels[index].slice(0,3)} ${date.format("MM/DD")}` 
+    };
   });
 };
 
 const get2WeeksDates = (startDate: Dayjs) => {
-  const allDates = [];
+  const dates = [];
   for (let i = 0; i < 14; i++) {
     const date = startDate.add(i, "day");
     const dayIndex = date.day();
-    const dayKey = daysOfWeek[dayIndex === 0 ? 6 : dayIndex - 1];
-    allDates.push({
-      name: dayLabels[dayIndex === 0 ? 6 : dayIndex - 1],
-      dayKey: dayKey,
+    // Convert Sunday (0) to index 6, Monday (1) to index 0, etc.
+    const adjustedIndex = dayIndex === 0 ? 6 : dayIndex - 1;
+    dates.push({
+      name: dayLabels[adjustedIndex],
+      dayKey: daysOfWeek[adjustedIndex],
       date: date.format("YYYY-MM-DD"),
-      display: `${dayLabels[dayIndex === 0 ? 6 : dayIndex - 1].slice(0,3)} ${date.format("MM/DD")}`,
+      display: `${dayLabels[adjustedIndex].slice(0,3)} ${date.format("MM/DD")}`
     });
   }
-  return allDates;
+  return dates;
 };
 
 const getMonthDates = (startDate: Dayjs) => {
+  const dates = [];
   const year = startDate.year();
   const month = startDate.month();
   const firstDayOfMonth = dayjs(new Date(year, month, 1));
   const lastDayOfMonth = firstDayOfMonth.endOf("month");
-  const allDates = [];
+  
   let currentDate = firstDayOfMonth;
   while (currentDate.isBefore(lastDayOfMonth) || currentDate.isSame(lastDayOfMonth, "day")) {
     const dayIndex = currentDate.day();
-    const dayKey = daysOfWeek[dayIndex === 0 ? 6 : dayIndex - 1];
-    allDates.push({
-      name: dayLabels[dayIndex === 0 ? 6 : dayIndex - 1],
-      dayKey: dayKey,
+    const adjustedIndex = dayIndex === 0 ? 6 : dayIndex - 1;
+    dates.push({
+      name: dayLabels[adjustedIndex],
+      dayKey: daysOfWeek[adjustedIndex],
       date: currentDate.format("YYYY-MM-DD"),
-      display: `${dayLabels[dayIndex === 0 ? 6 : dayIndex - 1].slice(0,3)} ${currentDate.format("MM/DD")}`,
-      isCurrentMonth: true,
+      display: `${dayLabels[adjustedIndex].slice(0,3)} ${currentDate.format("MM/DD")}`,
+      isCurrentMonth: true
     });
     currentDate = currentDate.add(1, "day");
   }
-  return allDates;
+  return dates;
 };
 
 const getActualShiftHours = (shiftDisplay: string, lunchMinutes: number): number => {
