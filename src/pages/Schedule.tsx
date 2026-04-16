@@ -859,125 +859,105 @@ export const Schedule: React.FC = () => {
   const renderCalendarView = () => {
     if (duration === "week") {
       const weekDates = dates;
-      return (
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                <th style={{ padding: "12px", textAlign: "left", backgroundColor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}>Technician</th>
-                {weekDates.map((day) => (
-                  <th key={day.date} style={{ padding: "12px", textAlign: "center", backgroundColor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}>
-                    <div>{day.display}</div>
-                    <div style={{ fontSize: "10px", color: "#9CA3AF" }}>{getDayDisplayInfo(day).timeDisplay}</div>
-                  </th>
-                ))}
-                <th style={{ padding: "12px", textAlign: "center", backgroundColor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}>Hours</th>
-                <th style={{ padding: "12px", textAlign: "center", backgroundColor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}>Pay</th>
-              </tr>
-            </thead>
-            <tbody>
-              {technicians.filter(t => t.include_in_scheduling !== false).map((tech) => {
-                const roleDisplay = getRoleDisplay(tech.role, tech.title);
-                const roleColor = getRoleColor(tech.role);
-                return (
-                  <tr key={tech.id}>
-                    <td style={{ padding: "12px", border: "1px solid rgba(255,255,255,0.1)" }}>
-                      <div style={{ fontWeight: "bold" }}>{tech.first_name} {tech.last_name}</div>
-                      <Tag color={roleColor} style={{ fontSize: "10px", marginTop: "4px" }}>{roleDisplay}</Tag>
-                    </td>
-                    {weekDates.map((day) => {
-                      const dayInfo = getDayDisplayInfo(day);
-                      const shiftValue = schedule[tech.id]?.[day.date] || "off";
-                      return (
-                        <td key={day.date} style={{ padding: "8px", textAlign: "center", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: !dayInfo.isOpen ? "rgba(244,67,54,0.1)" : "transparent" }}>
-                          {!dayInfo.isOpen ? (
-                            <Tag color="red">CLOSED</Tag>
-                          ) : (
-                            <Select
-                              value={shiftValue === "off" ? "off" : shiftValue}
-                              onChange={(v) => handleShiftChange(tech.id, day.date, v)}
-                              style={{ width: "120px" }}
-                              size="small"
-                            >
-                              <Option value="off">OFF</Option>
-                              <Option value={dayInfo.timeDisplay}>{dayInfo.timeDisplay}</Option>
-                            </Select>
-                          )}
-                        </td>
-                      );
-                    })}
-                    <td style={{ padding: "12px", textAlign: "center", border: "1px solid rgba(255,255,255,0.1)" }}>
-                      <Tag color={weeklyHours[tech.id] > (technicians.find(t => t.id === tech.id)?.max_hours || 0) ? "red" : "blue"}>
-                        {(weeklyHours[tech.id] || 0).toFixed(1)}
-                      </Tag>
-                    </td>
-                    <td style={{ padding: "12px", textAlign: "center", border: "1px solid rgba(255,255,255,0.1)" }}>
-                      ${(weeklyPay[tech.id] || 0).toFixed(2)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-           </>
-        </div>
+      return React.createElement("div", { style: { overflowX: "auto" } },
+        React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+          React.createElement("thead", null,
+            React.createElement("tr", null,
+              React.createElement("th", { style: { padding: "12px", textAlign: "left", backgroundColor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" } }, "Technician"),
+              ...weekDates.map((day) =>
+                React.createElement("th", { key: day.date, style: { padding: "12px", textAlign: "center", backgroundColor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" } },
+                  React.createElement("div", null, day.display),
+                  React.createElement("div", { style: { fontSize: "10px", color: "#9CA3AF" } }, getDayDisplayInfo(day).timeDisplay)
+                )
+              ),
+              React.createElement("th", { style: { padding: "12px", textAlign: "center", backgroundColor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" } }, "Hours"),
+              React.createElement("th", { style: { padding: "12px", textAlign: "center", backgroundColor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" } }, "Pay")
+            )
+          ),
+          React.createElement("tbody", null,
+            technicians.filter(t => t.include_in_scheduling !== false).map((tech) => {
+              const roleDisplay = getRoleDisplay(tech.role, tech.title);
+              const roleColor = getRoleColor(tech.role);
+              return React.createElement("tr", { key: tech.id },
+                React.createElement("td", { style: { padding: "12px", border: "1px solid rgba(255,255,255,0.1)" } },
+                  React.createElement("div", { style: { fontWeight: "bold" } }, tech.first_name, " ", tech.last_name),
+                  React.createElement(Tag, { color: roleColor, style: { fontSize: "10px", marginTop: "4px" } }, roleDisplay)
+                ),
+                ...weekDates.map((day) => {
+                  const dayInfo = getDayDisplayInfo(day);
+                  const shiftValue = schedule[tech.id]?.[day.date] || "off";
+                  return React.createElement("td", { key: day.date, style: { padding: "8px", textAlign: "center", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: !dayInfo.isOpen ? "rgba(244,67,54,0.1)" : "transparent" } },
+                    !dayInfo.isOpen ? React.createElement(Tag, { color: "red" }, "CLOSED") :
+                      React.createElement(Select, {
+                        value: shiftValue === "off" ? "off" : shiftValue,
+                        onChange: (v: string) => handleShiftChange(tech.id, day.date, v),
+                        style: { width: "120px" },
+                        size: "small"
+                      },
+                        React.createElement(Option, { value: "off" }, "OFF"),
+                        React.createElement(Option, { value: dayInfo.timeDisplay }, dayInfo.timeDisplay)
+                      )
+                  );
+                }),
+                React.createElement("td", { style: { padding: "12px", textAlign: "center", border: "1px solid rgba(255,255,255,0.1)" } },
+                  React.createElement(Tag, { color: weeklyHours[tech.id] > (technicians.find(t => t.id === tech.id)?.max_hours || 0) ? "red" : "blue" }, (weeklyHours[tech.id] || 0).toFixed(1))
+                ),
+                React.createElement("td", { style: { padding: "12px", textAlign: "center", border: "1px solid rgba(255,255,255,0.1)" } },
+                  "$", (weeklyPay[tech.id] || 0).toFixed(2)
+                )
+              );
+            })
+          )
+        )
       );
     } else {
-      return (
-        <div style={{ overflowX: "auto" }}>
-          {weeks.map((week, weekIndex) => (
-            <div key={weekIndex} style={{ marginBottom: "24px" }}>
-              <h4 style={{ color: "#E5E7EB", marginBottom: "12px" }}>Week {weekIndex + 1}</h4>
-              <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: "16px" }}>
-                <thead>
-                  <tr>
-                    <th style={{ padding: "12px", textAlign: "left", backgroundColor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}>Technician</th>
-                    {week.map((day) => (
-                      <th key={day.date} style={{ padding: "12px", textAlign: "center", backgroundColor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}>
-                        <div>{day.display}</div>
-                        <div style={{ fontSize: "10px", color: "#9CA3AF" }}>{getDayDisplayInfo(day).timeDisplay}</div>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {technicians.filter(t => t.include_in_scheduling !== false).map((tech) => {
-                    const roleDisplay = getRoleDisplay(tech.role, tech.title);
-                    const roleColor = getRoleColor(tech.role);
-                    return (
-                      <tr key={tech.id}>
-                        <td style={{ padding: "12px", border: "1px solid rgba(255,255,255,0.1)" }}>
-                          <div style={{ fontWeight: "bold" }}>{tech.first_name} {tech.last_name}</div>
-                          <Tag color={roleColor} style={{ fontSize: "10px", marginTop: "4px" }}>{roleDisplay}</Tag>
-                        </td>
-                        {week.map((day) => {
-                          const dayInfo = getDayDisplayInfo(day);
-                          const shiftValue = schedule[tech.id]?.[day.date] || "off";
-                          return (
-                            <td key={day.date} style={{ padding: "8px", textAlign: "center", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: !dayInfo.isOpen ? "rgba(244,67,54,0.1)" : "transparent" }}>
-                              {!dayInfo.isOpen ? (
-                                <Tag color="red">CLOSED</Tag>
-                              ) : (
-                                <Select
-                                  value={shiftValue === "off" ? "off" : shiftValue}
-                                  onChange={(v) => handleShiftChange(tech.id, day.date, v)}
-                                  style={{ width: "120px" }}
-                                  size="small"
-                                >
-                                  <Option value="off">OFF</Option>
-                                  <Option value={dayInfo.timeDisplay}>{dayInfo.timeDisplay}</Option>
-                                </Select>
-                              )}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          ))}
-        </div>
+      return React.createElement("div", { style: { overflowX: "auto" } },
+        weeks.map((week, weekIndex) =>
+          React.createElement("div", { key: weekIndex, style: { marginBottom: "24px" } },
+            React.createElement("h4", { style: { color: "#E5E7EB", marginBottom: "12px" } }, "Week ", weekIndex + 1),
+            React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", marginBottom: "16px" } },
+              React.createElement("thead", null,
+                React.createElement("tr", null,
+                  React.createElement("th", { style: { padding: "12px", textAlign: "left", backgroundColor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" } }, "Technician"),
+                  ...week.map((day) =>
+                    React.createElement("th", { key: day.date, style: { padding: "12px", textAlign: "center", backgroundColor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" } },
+                      React.createElement("div", null, day.display),
+                      React.createElement("div", { style: { fontSize: "10px", color: "#9CA3AF" } }, getDayDisplayInfo(day).timeDisplay)
+                    )
+                  )
+                )
+              ),
+              React.createElement("tbody", null,
+                technicians.filter(t => t.include_in_scheduling !== false).map((tech) => {
+                  const roleDisplay = getRoleDisplay(tech.role, tech.title);
+                  const roleColor = getRoleColor(tech.role);
+                  return React.createElement("tr", { key: tech.id },
+                    React.createElement("td", { style: { padding: "12px", border: "1px solid rgba(255,255,255,0.1)" } },
+                      React.createElement("div", { style: { fontWeight: "bold" } }, tech.first_name, " ", tech.last_name),
+                      React.createElement(Tag, { color: roleColor, style: { fontSize: "10px", marginTop: "4px" } }, roleDisplay)
+                    ),
+                    ...week.map((day) => {
+                      const dayInfo = getDayDisplayInfo(day);
+                      const shiftValue = schedule[tech.id]?.[day.date] || "off";
+                      return React.createElement("td", { key: day.date, style: { padding: "8px", textAlign: "center", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: !dayInfo.isOpen ? "rgba(244,67,54,0.1)" : "transparent" } },
+                        !dayInfo.isOpen ? React.createElement(Tag, { color: "red" }, "CLOSED") :
+                          React.createElement(Select, {
+                            value: shiftValue === "off" ? "off" : shiftValue,
+                            onChange: (v: string) => handleShiftChange(tech.id, day.date, v),
+                            style: { width: "120px" },
+                            size: "small"
+                          },
+                            React.createElement(Option, { value: "off" }, "OFF"),
+                            React.createElement(Option, { value: dayInfo.timeDisplay }, dayInfo.timeDisplay)
+                          )
+                      );
+                    })
+                  );
+                })
+              )
+            )
+          )
+        )
       );
     }
   };
