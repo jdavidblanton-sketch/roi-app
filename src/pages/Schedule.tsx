@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { Table, Button, Select, Card, message, Switch, Space, Radio, Modal, Tag, Tooltip, InputNumber, Divider, Statistic, Row, Col, DatePicker, List, Popconfirm, Input, Avatar } from "antd";
-import { SaveOutlined, ThunderboltOutlined, DollarOutlined, ClockCircleOutlined, SettingOutlined, CalendarOutlined, UnorderedListOutlined, FolderOpenOutlined, DeleteOutlined, UserOutlined } from "@ant-design/icons";
+import { Table, Button, Select, Card, message, Switch, Space, Radio, Modal, Tag, Tooltip, InputNumber, Divider, Statistic, Row, Col, DatePicker, List, Popconfirm, Input } from "antd";
+import { SaveOutlined, ThunderboltOutlined, DollarOutlined, ClockCircleOutlined, SettingOutlined, CalendarOutlined, UnorderedListOutlined, FolderOpenOutlined, DeleteOutlined } from "@ant-design/icons";
 import { supabaseClient } from "../utils";
 import { Typography } from "antd";
 import dayjs, { Dayjs } from "dayjs";
@@ -245,7 +245,6 @@ const generateStaggeredShifts = (
   const schedule: Record<string, Record<string, string>> = {};
   const weeklyHours: Record<string, number> = {};
   
-  // Initialize all OFF
   for (const tech of technicians) {
     schedule[tech.id] = {};
     weeklyHours[tech.id] = 0;
@@ -259,10 +258,8 @@ const generateStaggeredShifts = (
   const targetShiftHours = autoRules?.target_shift_hours || 8;
   const lunchMinutes = autoRules?.lunch_minutes || 30;
   const paidShiftHours = targetShiftHours - (lunchMinutes / 60);
-  const minTechsPerShift = autoRules?.min_techs_per_shift || 2;
   const maxTechsPerShift = autoRules?.max_techs_per_shift || 4;
   
-  // Sort technicians by role priority (management first, then lead, then techs)
   const rolePriority = (tech: Technician): number => {
     const role = tech.role?.toLowerCase() || "";
     if (role === "management") return 1;
@@ -272,20 +269,15 @@ const generateStaggeredShifts = (
     return 5;
   };
   
-  // For each day, determine who works
   for (let dayIndex = 0; dayIndex < dates.length; dayIndex++) {
     const day = dates[dayIndex];
     const dayName = day.name;
     const dayKey = day.dayKey as keyof OperationalHours;
     const dayHours = operationalHours[dayKey];
     
-    // Check if shop is open
     if (!dayHours?.open || !dayHours?.close) continue;
-    
-    // Check if work week allows this day
     if (!workWeek[dayKey as keyof WorkWeek]) continue;
     
-    // Check for holiday
     const holiday = holidays.find(h => h.date === day.date);
     if (holiday?.is_closed) continue;
     
@@ -300,20 +292,14 @@ const generateStaggeredShifts = (
     const closeHour = parseTimeToDecimal(closeTime);
     const totalOpenHours = closeHour - openHour;
     
-    // Calculate how many techs we need based on max techs per shift
-    let techsNeeded = maxTechsPerShift;
-    
-    // Get eligible techs for this day
     let eligibleTechs = [...technicians].filter(t => t.include_in_scheduling !== false);
     
-    // Filter by day off
     if (respectDayOff) {
       eligibleTechs = eligibleTechs.filter(tech => 
         tech.primary_day_off !== dayName && tech.secondary_day_off !== dayName
       );
     }
     
-    // Filter by max hours
     if (respectHoursLimits) {
       eligibleTechs = eligibleTechs.filter(tech => {
         if (tech.max_hours > 0 && weeklyHours[tech.id] + paidShiftHours > tech.max_hours) {
@@ -323,14 +309,12 @@ const generateStaggeredShifts = (
       });
     }
     
-    // Sort by role priority (higher priority first) then by hours
     eligibleTechs.sort((a, b) => {
       const priorityCompare = rolePriority(a) - rolePriority(b);
       if (priorityCompare !== 0) return priorityCompare;
       return weeklyHours[a.id] - weeklyHours[b.id];
     });
     
-    // Apply rotation pattern for fair distribution among same role levels
     if (rotationPattern > 0 && eligibleTechs.length > 0) {
       const rotationOffset = Math.floor(dayIndex / rotationPattern) % eligibleTechs.length;
       if (rotationOffset > 0) {
@@ -343,34 +327,27 @@ const generateStaggeredShifts = (
       }
     }
     
-    // Assign shifts to needed number of techs
-    const techsToAssign = Math.min(techsNeeded, eligibleTechs.length);
+    const techsToAssign = Math.min(maxTechsPerShift, eligibleTechs.length);
     if (techsToAssign === 0) continue;
     
-    // Calculate staggered shift start times based on role
-    // Management gets opening shift, lead gets mid, techs get staggered
     const shiftStartTimes: number[] = [];
-    const shiftDuration = targetShiftHours;
-    
     if (techsToAssign === 1) {
       shiftStartTimes.push(openHour);
     } else {
-      // Spread shifts across the day
-      const step = (totalOpenHours - shiftDuration) / (techsToAssign - 1);
+      const step = (totalOpenHours - targetShiftHours) / (techsToAssign - 1);
       for (let i = 0; i < techsToAssign; i++) {
         let startTime = openHour + (step * i);
-        if (startTime + shiftDuration > closeHour) {
-          startTime = closeHour - shiftDuration;
+        if (startTime + targetShiftHours > closeHour) {
+          startTime = closeHour - targetShiftHours;
         }
         shiftStartTimes.push(startTime);
       }
     }
     
-    // Assign shifts - management gets earliest, lead gets middle, techs get rest
     for (let i = 0; i < techsToAssign && i < eligibleTechs.length; i++) {
       const tech = eligibleTechs[i];
       const startHour = shiftStartTimes[i];
-      const endHour = startHour + shiftDuration;
+      const endHour = startHour + targetShiftHours;
       
       const startTimeStr = formatTime(startHour);
       const endTimeStr = formatTime(endHour);
@@ -381,7 +358,6 @@ const generateStaggeredShifts = (
     }
   }
   
-  // SECOND PASS: Ensure minimum hours
   if (respectHoursLimits) {
     for (const tech of technicians) {
       if (tech.min_hours <= 0) continue;
@@ -934,10 +910,10 @@ export const Schedule: React.FC = () => {
                       <Tag color={weeklyHours[tech.id] > (technicians.find(t => t.id === tech.id)?.max_hours || 0) ? "red" : "blue"}>
                         {(weeklyHours[tech.id] || 0).toFixed(1)}
                       </Tag>
-                     </td>
+                    </td>
                     <td style={{ padding: "12px", textAlign: "center", border: "1px solid rgba(255,255,255,0.1)" }}>
                       ${(weeklyPay[tech.id] || 0).toFixed(2)}
-                     </td>
+                    </td>
                   </tr>
                 );
               })}
@@ -991,14 +967,14 @@ export const Schedule: React.FC = () => {
                                   <Option value={dayInfo.timeDisplay}>{dayInfo.timeDisplay}</Option>
                                 </Select>
                               )}
-                             </td>
+                            </td>
                           );
                         })}
                       </tr>
                     );
                   })}
                 </tbody>
-              </View>
+              </table>
             </div>
           ))}
         </div>
