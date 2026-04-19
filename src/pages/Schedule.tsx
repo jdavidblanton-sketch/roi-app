@@ -81,7 +81,6 @@ const parseTimeToDecimal = (timeStr: string): number => {
   return hour + minute / 60;
 };
 
-// Unified date generation - all return the same format
 const getWeekDates = (startDate: Dayjs) => {
   return daysOfWeek.map((day, index) => {
     const date = startDate.add(index, "day");
@@ -99,7 +98,6 @@ const get2WeeksDates = (startDate: Dayjs) => {
   for (let i = 0; i < 14; i++) {
     const date = startDate.add(i, "day");
     const dayIndex = date.day();
-    // Convert Sunday (0) to index 6, Monday (1) to index 0, etc.
     const adjustedIndex = dayIndex === 0 ? 6 : dayIndex - 1;
     dates.push({
       name: dayLabels[adjustedIndex],
@@ -245,6 +243,7 @@ const generateStaggeredShifts = (
   const schedule: Record<string, Record<string, string>> = {};
   const weeklyHours: Record<string, number> = {};
   
+  // Initialize all OFF
   for (const tech of technicians) {
     schedule[tech.id] = {};
     weeklyHours[tech.id] = 0;
@@ -259,6 +258,7 @@ const generateStaggeredShifts = (
   const lunchMinutes = autoRules?.lunch_minutes || 30;
   const paidShiftHours = targetShiftHours - (lunchMinutes / 60);
   const maxTechsPerShift = autoRules?.max_techs_per_shift || 4;
+  const minTechsPerShift = autoRules?.min_techs_per_shift || 2;
   
   const rolePriority = (tech: Technician): number => {
     const role = tech.role?.toLowerCase() || "";
@@ -270,12 +270,17 @@ const generateStaggeredShifts = (
     return 6;
   };
   
+  // Track shift index for rotation across days
+  let shiftTypeIndex = 0;
+  const shiftTypes = ["early", "mid", "late"];
+  
   for (let dayIndex = 0; dayIndex < dates.length; dayIndex++) {
     const day = dates[dayIndex];
     const dayName = day.name;
     const dayKey = day.dayKey as keyof OperationalHours;
     const dayHours = operationalHours[dayKey];
     
+    // Skip if shop is closed
     if (!dayHours?.open || !dayHours?.close) continue;
     if (!workWeek[dayKey as keyof WorkWeek]) continue;
     
@@ -293,6 +298,7 @@ const generateStaggeredShifts = (
     const closeHour = parseTimeToDecimal(closeTime);
     const totalOpenHours = closeHour - openHour;
     
+    // Get all eligible techs (not on day off, not exceeding max hours)
     let eligibleTechs = [...technicians].filter(t => t.include_in_scheduling !== false);
     
     if (respectDayOff) {
@@ -310,12 +316,21 @@ const generateStaggeredShifts = (
       });
     }
     
+    // Calculate how many techs needed for this day
+    let techsNeeded = Math.ceil(totalOpenHours / targetShiftHours);
+    techsNeeded = Math.max(minTechsPerShift, Math.min(maxTechsPerShift, techsNeeded));
+    techsNeeded = Math.min(techsNeeded, eligibleTechs.length);
+    
+    if (techsNeeded === 0) continue;
+    
+    // Sort by role priority then by hours worked
     eligibleTechs.sort((a, b) => {
       const priorityCompare = rolePriority(a) - rolePriority(b);
       if (priorityCompare !== 0) return priorityCompare;
       return weeklyHours[a.id] - weeklyHours[b.id];
     });
     
+    // Apply rotation pattern - this ONLY rotates which techs get which shift types
     if (rotationPattern > 0 && eligibleTechs.length > 0) {
       const rotationOffset = Math.floor(dayIndex / rotationPattern) % eligibleTechs.length;
       if (rotationOffset > 0) {
@@ -328,15 +343,15 @@ const generateStaggeredShifts = (
       }
     }
     
-    const techsToAssign = Math.min(maxTechsPerShift, eligibleTechs.length);
-    if (techsToAssign === 0) continue;
-    
+    // Calculate staggered shift start times
     const shiftStartTimes: number[] = [];
-    if (techsToAssign === 1) {
+    if (techsNeeded === 1) {
+      // Single tech works the whole day
       shiftStartTimes.push(openHour);
     } else {
-      const step = (totalOpenHours - targetShiftHours) / (techsToAssign - 1);
-      for (let i = 0; i < techsToAssign; i++) {
+      // Stagger shifts across the day
+      const step = (totalOpenHours - targetShiftHours) / (techsNeeded - 1);
+      for (let i = 0; i < techsNeeded; i++) {
         let startTime = openHour + (step * i);
         if (startTime + targetShiftHours > closeHour) {
           startTime = closeHour - targetShiftHours;
@@ -345,7 +360,8 @@ const generateStaggeredShifts = (
       }
     }
     
-    for (let i = 0; i < techsToAssign && i < eligibleTechs.length; i++) {
+    // Assign shifts
+    for (let i = 0; i < techsNeeded && i < eligibleTechs.length; i++) {
       const tech = eligibleTechs[i];
       const startHour = shiftStartTimes[i];
       const endHour = startHour + targetShiftHours;
@@ -359,6 +375,7 @@ const generateStaggeredShifts = (
     }
   }
   
+  // SECOND PASS: Ensure minimum hours for all techs
   if (respectHoursLimits) {
     for (const tech of technicians) {
       if (tech.min_hours <= 0) continue;
@@ -612,7 +629,7 @@ export const Schedule: React.FC = () => {
     setWeeklyPay(tempPay);
     setTotalPay(tempTotal);
     
-    message.success("Schedule generated successfully");
+    message.success(`Schedule generated for ${duration} with ${dates.length} days`);
   };
 
   const handleSaveSchedule = async () => {
